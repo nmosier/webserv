@@ -1,0 +1,2 @@
+#define BACKLOG 10
+#define SERVER_PORT 30000
