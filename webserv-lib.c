@@ -49,7 +49,6 @@ int server_listen(const char *port, int backlog) {
       goto cleanup;
    }
 
-   /* cleanup */
  cleanup:
    /* close server socket (if error occurred) */
    if (error && servsock_fd >= 0 && close(servsock_fd) < 0) {
