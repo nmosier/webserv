@@ -77,49 +77,53 @@ int server_start(const char *port, int backlog) {
 
 #define REQ_RD_TEXTFREE(req) ((req)->hr_text_size - ((req)->hr_text_endp - (req)->hr_text))
 
-int request_read(int servsock_fd, int conn_fd, httpreq_t **reqp) {
+int request_init(httpreq_t *req) {
+   /* zero out struct */
+   memset(req, 0, sizeof(httpreq_t));
+
+   /* allocate & initialize buffer */
+   req->hr_text_size = REQ_RD_BUFSIZE;
+   req->hr_text_endp = req->hr_text = malloc(req->hr_text_size + 1); // +1 for null terminator
+   if (req->hr_text == NULL) {
+      return -1;
+   }
+   
+   /* allocate & initialize headers */
+   req->hr_headers = calloc(REQ_RD_NHEADERS + 1, sizeof(httpreq_header_t)); // +1 for null term.
+   if (req->hr_headers == NULL) {
+      return -1;
+   }
+
+   return 0;
+}
+
+// ONLY FOR INTERNAL USE
+int request_read(int servsock_fd, int conn_fd, httpreq_t *req) {
+   
+}
+
+int request_read(int servsock_fd, int conn_fd, httpreq_t *req);
+int request_get(int servsock_fd, int conn_fd, httpreq_t **reqp) {
    httpreq_t *req;
-   char *reqbuf;
-   size_t reqbuf_size;
    int msg_done;
    ssize_t bytes_received;
    size_t bytes_free;
 
-   
+   /* initialize request if necessary */
    req = *reqp;
    if (req == NULL) {
-      /* initialize HTTP request & buffer  */
-
-      /* allocate & initialize request */
-      req = *reqp = malloc(sizeof(httpreq_t));
+      /* allocate request */
+      req = malloc(sizeof(httpreq_t));
       if (req == NULL) {
-         perror("malloc");
          return REQ_RD_RERROR;
       }
-      memset(req, 0, sizeof(httpreq_t)); // zero out request (for error handling)
-
-      /* allocate & initialize buffer */
-      reqbuf_size = REQ_RD_BUFSIZE;
-      reqbuf = malloc(reqbuf_size + 1); // +1 for null term.
-      if (reqbuf == NULL) {
-         perror("malloc");
+      
+      /* initialize request */
+      if (request_init(req) < 0) {
          request_delete(req);
-         *reqp = NULL;
          return REQ_RD_RERROR;
       }
-      *reqbuf = '\0'; // reqbuf points to empty string
-      req->hr_text = reqbuf;
-      req->hr_text_endp = reqbuf;
-      req->hr_text_size = reqbuf_size;
-
-      /* allocate & initialize headers */
-      req->hr_headers = calloc(REQ_RD_NHEADERS + 1, sizeof(httpreq_header_t)); // +1 for null term.
-      if (req->hr_headers == NULL) {
-         perror("malloc");
-         request_delete(req);
-         *reqp = NULL;
-         return REQ_RD_RERROR;
-      }
+      *reqp = req;
    }
 
    /* read until block, EOF, or \r\n */

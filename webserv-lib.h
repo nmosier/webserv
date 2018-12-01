@@ -30,7 +30,8 @@ typedef struct {
 
 
 int server_start(const char *port, int backlog);
-int request_read(int servsock_fd, int conn_fd, httpreq_t **reqp);
+int request_init(httpreq_t *req);
+int request_get(int servsock_fd, int conn_fd, httpreq_t **reqp);
 void request_delete(httpreq_t *req);
 
 
