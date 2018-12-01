@@ -8,10 +8,10 @@
 #include "webserv-multi.h"
 
 int main(int argc, char *argv[]) {
-   /* test server_listen() */
+   /* test server_start() */
    int sock_fd;
-   if ((sock_fd = server_listen(argv[1], BACKLOG)) < 0) {
-      fprintf(stderr, "server_listen failed.\n");
+   if ((sock_fd = server_start(argv[1], BACKLOG)) < 0) {
+      fprintf(stderr, "server_start failed.\n");
       exit(1);
    }
 
