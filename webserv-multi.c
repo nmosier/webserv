@@ -37,7 +37,7 @@ int main(int argc, char *argv[]) {
    httpreq_t *req = NULL; // must initialize
    int req_stat;
    do {
-      req_stat = request_read(server_fd, client_fd, &req);
+      req_stat = request_get(server_fd, client_fd, &req);
    } while (req_stat == REQ_RD_RAGAIN);
 
    printf("request_read status: %d\n", req_stat);
