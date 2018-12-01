@@ -1,8 +1,12 @@
+#include <stdlib.h>
 #include <stdio.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <errno.h>
+#include <string.h>
+#include "webserv-lib.h"
 
 // prints errors
 int server_start(const char *port, int backlog) {
@@ -16,8 +20,8 @@ int server_start(const char *port, int backlog) {
    res = NULL;
    error = 0; // error=1 if error occurred
    
-   /* obtain socket */
-   if ((servsock_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+   /* obtain (nonblocking) socket */
+   if ((servsock_fd = socket(AF_INET, SOCK_STREAM|SOCK_NONBLOCK, 0)) < 0) {
       perror("socket");
       error = 1;
       goto cleanup;
@@ -69,19 +73,13 @@ int server_start(const char *port, int backlog) {
 // returns -1 & error EAGAIN or EWOULDBLOCK if not available
 // if *req is null, then create new. Else resume read.
 #define REQ_RD_BUFSIZE  (0x1000-1)
-#defien REQ_RD_NHEADERS 10
-
-#define REQ_RD_RSUCCESS 0
-#define REQ_RD_RERRROR -1
-#define REQ_RD_RAGAIN   1
-#define REQ_RD_RSYNTAX -2
+#define REQ_RD_NHEADERS 10
 
 #define REQ_RD_TEXTFREE(req) ((req)->hr_text_size - ((req)->hr_text_endp - (req)->hr_text))
 
 int request_read(int servsock_fd, int conn_fd, httpreq_t **reqp) {
    httpreq_t *req;
-   httpreq_header_t *headers;
-   char *reqbuf, *reqbufp;
+   char *reqbuf;
    size_t reqbuf_size;
    int msg_done;
    ssize_t bytes_received;
@@ -96,10 +94,9 @@ int request_read(int servsock_fd, int conn_fd, httpreq_t **reqp) {
       req = *reqp = malloc(sizeof(httpreq_t));
       if (req == NULL) {
          perror("malloc");
-         free(reqbuf); // free buffer
          return REQ_RD_RERROR;
       }
-      memset(req, 0, sizeof(req)); // zero out request (for error handling)
+      memset(req, 0, sizeof(httpreq_t)); // zero out request (for error handling)
 
       /* allocate & initialize buffer */
       reqbuf_size = REQ_RD_BUFSIZE;
@@ -107,6 +104,7 @@ int request_read(int servsock_fd, int conn_fd, httpreq_t **reqp) {
       if (reqbuf == NULL) {
          perror("malloc");
          request_delete(req);
+         *reqp = NULL;
          return REQ_RD_RERROR;
       }
       *reqbuf = '\0'; // reqbuf points to empty string
@@ -119,6 +117,7 @@ int request_read(int servsock_fd, int conn_fd, httpreq_t **reqp) {
       if (req->hr_headers == NULL) {
          perror("malloc");
          request_delete(req);
+         *reqp = NULL;
          return REQ_RD_RERROR;
       }
    }
@@ -134,6 +133,7 @@ int request_read(int servsock_fd, int conn_fd, httpreq_t **reqp) {
          if (newtext == NULL) {
             perror("realloc");
             request_delete(req);
+            *reqp = NULL;
             return REQ_RD_RERROR;
          }
          req->hr_text_size *= 2;
@@ -148,8 +148,8 @@ int request_read(int servsock_fd, int conn_fd, httpreq_t **reqp) {
       /* if bytes received, update request fields */
       if (bytes_received > 0) {
          /* update text buffer fields */
-         req->text_endp += bytes_received;
-         *(req->text_endp) = '\0';
+         req->hr_text_endp += bytes_received;
+         *(req->hr_text_endp) = '\0';
          
          /* check for terminating line */
          if (req->hr_text_endp - req->hr_text >= 4 &&
@@ -168,18 +168,23 @@ int request_read(int servsock_fd, int conn_fd, httpreq_t **reqp) {
       /* otherwise, report error */
       perror("recv");
       request_delete(req);
+      *reqp = NULL;
       return REQ_RD_RERROR;
    }
    
    /* check for premature EOF */
    if (bytes_received == 0 && !msg_done) {
       request_delete(req);
+      *reqp = NULL;
       return REQ_RD_RSYNTAX;
    }
 
    /* otherwise, parse request */
    printf("HTTP REQUEST from %d:\n%s\n", conn_fd, req->hr_text);
    request_delete(req);
+   *reqp = NULL;
+
+   return REQ_RD_RSUCCESS;
 }
 
 void request_delete(httpreq_t *req) {

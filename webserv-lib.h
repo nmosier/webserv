@@ -2,7 +2,7 @@
 
 /* HTTP request methods */
 typedef enum {
-   case HR_M_GET
+   HR_M_GET
 } httpreq_method_t;
 
 /* HTTP request line */
@@ -32,3 +32,11 @@ typedef struct {
 int server_start(const char *port, int backlog);
 int request_read(int servsock_fd, int conn_fd, httpreq_t **reqp);
 void request_delete(httpreq_t *req);
+
+
+enum {
+   REQ_RD_RSUCCESS,
+   REQ_RD_RERROR,
+   REQ_RD_RAGAIN,
+   REQ_RD_RSYNTAX
+};
