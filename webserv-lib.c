@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <netdb.h>
@@ -93,38 +94,16 @@ int request_init(httpreq_t *req) {
    if (req->hr_headers == NULL) {
       return -1;
    }
+   req->hr_nheaders = REQ_RD_NHEADERS;
 
    return 0;
 }
 
-// ONLY FOR INTERNAL USE
-int request_read(int servsock_fd, int conn_fd, httpreq_t *req) {
-   
-}
 
-int request_read(int servsock_fd, int conn_fd, httpreq_t *req);
-int request_get(int servsock_fd, int conn_fd, httpreq_t **reqp) {
-   httpreq_t *req;
+int request_read(int servsock_fd, int conn_fd, httpreq_t *req) {
    int msg_done;
    ssize_t bytes_received;
    size_t bytes_free;
-
-   /* initialize request if necessary */
-   req = *reqp;
-   if (req == NULL) {
-      /* allocate request */
-      req = malloc(sizeof(httpreq_t));
-      if (req == NULL) {
-         return REQ_RD_RERROR;
-      }
-      
-      /* initialize request */
-      if (request_init(req) < 0) {
-         request_delete(req);
-         return REQ_RD_RERROR;
-      }
-      *reqp = req;
-   }
 
    /* read until block, EOF, or \r\n */
    msg_done = 0; // whether terminating \r\n has been encountered
@@ -136,8 +115,6 @@ int request_get(int servsock_fd, int conn_fd, httpreq_t **reqp) {
          newtext = realloc(req->hr_text, req->hr_text_size * 2);
          if (newtext == NULL) {
             perror("realloc");
-            request_delete(req);
-            *reqp = NULL;
             return REQ_RD_RERROR;
          }
          req->hr_text_size *= 2;
@@ -171,24 +148,127 @@ int request_get(int servsock_fd, int conn_fd, httpreq_t **reqp) {
       }
       /* otherwise, report error */
       perror("recv");
-      request_delete(req);
-      *reqp = NULL;
       return REQ_RD_RERROR;
    }
    
-   /* check for premature EOF */
-   if (bytes_received == 0 && !msg_done) {
-      request_delete(req);
-      *reqp = NULL;
-      return REQ_RD_RSYNTAX;
+   return REQ_RD_RSUCCESS;
+}
+
+
+// convert string to method
+httpreq_method_t hr_str2meth(const char *str) {
+   typedef struct {
+      const char *str;
+      httpreq_method_t meth;
+   } str2meth_t;
+   
+   str2meth_t str2meth[] = {
+      {"GET", HR_M_GET},
+      {0,            0}
+   };
+
+   for (str2meth_t *it = str2meth; it->str; ++it) {
+      if (strcmp(it->str, str) == 0) {
+         return it->meth;
+      }
    }
 
-   /* otherwise, parse request */
-   printf("HTTP REQUEST from %d:\n%s\n", conn_fd, req->hr_text);
-   request_delete(req);
-   *reqp = NULL;
+   return -1;
+}
 
-   return REQ_RD_RSUCCESS;
+#define strprefix(s1, s2)   (!strncmp(s1, s2, strlen(s1))) // is s1 a prefix of s2?
+#define strskip(s1, s2)     (strprefix(s1, s2) ? s2 + strlen(s1) : NULL) // consume prefix
+
+char *strstrip(char *str, char *strip) {
+   while (*str && strchr(strip, *str)) {
+      ++str;
+   }
+   return str;
+}
+char *strrstrip(char *str, char *strip) {
+   char *str_it;
+   for (str_it = strchr(str, '\0'); str_it > str && strchr(strip, str[-1]); --str_it) {}
+   *str_it = '\0';
+   return str;
+}
+
+char *strstrip(char *str, char *strip);
+char *strrstrip(char *str, char *strip);
+
+#define REQ_PRS_HTTP_PREFIX "HTTP/"
+int request_parse(httpreq_t *req) {
+   char *saveptr_text;
+
+   ////////// PARSE REQUEST LINE /////////
+   char *req_line, *req_method_str, *req_version;
+   req_line = strtok_r(req->hr_text, "\n", &saveptr_text); // has trailing '\r'
+
+   /* parse request line method */
+   if ((req_method_str = strtok(req_line, " "))) {
+      req->hr_line.method = hr_str2meth(req_method_str);
+   }
+   if (req_method_str == NULL || req->hr_line.method < 0) {
+      return REQ_PRS_RSYNTAX;
+   }
+
+   /* parse request line URI */
+   if ((req->hr_line.uri = strtok(NULL, " ")) == NULL) {
+      return REQ_PRS_RSYNTAX;
+   }
+
+   /* parse request line HTTP version */
+   req_version = strtok(NULL, "\r"); // last item in line
+   if (req_version && (req->hr_line.version = strskip("HTTP/", req_version))) {
+   } else {
+      return REQ_PRS_RSYNTAX;
+   }
+   
+   ///////// PARSE REQUEST HEADERS /////////
+   httpreq_header_t *header_it;
+   char *header_value;
+   char *header_str;
+   for (header_it = req->hr_headers;
+        (header_str = strtok_r(NULL, "\n", &saveptr_text))
+           && strcmp(header_str, "\r");
+        ++header_it) {
+
+      /* check if array full */
+      if (header_it == req->hr_headers + req->hr_nheaders) {
+         /* expand header size */
+         httpreq_header_t *newheaders;
+         size_t new_nheaders;
+         size_t header_i;
+
+         header_i = header_it - req->hr_headers; // current index
+         new_nheaders = req->hr_nheaders * 2;
+         newheaders = realloc(req->hr_headers, (new_nheaders+1) * sizeof(httpreq_header_t));
+         if (newheaders == NULL) {
+            return REQ_PRS_RERROR;
+         }
+         req->hr_headers = newheaders;
+         header_it = newheaders + header_i; // update header iterator
+         
+         /* zero out uninitialized memory */
+         memset(header_it+1, 0, sizeof(httpreq_header_t) * (new_nheaders - req->hr_nheaders));
+         req->hr_nheaders = new_nheaders;
+      }
+      
+      /* parse single request header */
+
+      /* get key */
+      if ((header_it->key = strtok(header_str, ":")) == NULL) {
+         return REQ_PRS_RSYNTAX;
+      }
+      /* get value */
+      if ((header_value = strtok(NULL, "\r")) == NULL) {
+         return REQ_PRS_RSYNTAX;
+      } else {
+         /* strip leading whitespace */
+         header_it->value = strstrip(header_value, " ");
+      }
+   }
+   
+   return REQ_PRS_RSUCCESS;
 }
 
 void request_delete(httpreq_t *req) {

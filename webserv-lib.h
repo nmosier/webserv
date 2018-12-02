@@ -9,7 +9,7 @@ typedef enum {
 typedef struct {
    httpreq_method_t method;
    char *uri;
-   char *http_version; // not including leading HTTP/
+   char *version; // not including leading HTTP/
 } httpreq_line_t;
 
 /* HTTP request header */
@@ -20,7 +20,7 @@ typedef struct {
 
 /* HTTP request */
 typedef struct {
-   httpreq_line_t *hr_line;
+   httpreq_line_t hr_line;
    httpreq_header_t *hr_headers; // null-termianted array of headers
    int hr_nheaders;
    char *hr_text; // request as unparsed string
@@ -31,13 +31,19 @@ typedef struct {
 
 int server_start(const char *port, int backlog);
 int request_init(httpreq_t *req);
-int request_get(int servsock_fd, int conn_fd, httpreq_t **reqp);
+int request_read(int servsock_fd, int conn_fd, httpreq_t *req);
+int request_parse(httpreq_t *req);
 void request_delete(httpreq_t *req);
 
 
 enum {
    REQ_RD_RSUCCESS,
    REQ_RD_RERROR,
-   REQ_RD_RAGAIN,
-   REQ_RD_RSYNTAX
+   REQ_RD_RAGAIN
+};
+
+enum {
+   REQ_PRS_RSUCCESS,
+   REQ_PRS_RSYNTAX,
+   REQ_PRS_RERROR
 };
