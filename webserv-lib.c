@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <string.h>
 #include "webserv-lib.h"
+#include "webserv-util.h"
 
 // prints errors
 int server_start(const char *port, int backlog) {
@@ -73,8 +74,6 @@ int server_start(const char *port, int backlog) {
 // nonblocking -- so super-slow connections don't gum up the works
 // returns -1 & error EAGAIN or EWOULDBLOCK if not available
 // if *req is null, then create new. Else resume read.
-#define REQ_RD_BUFSIZE  (0x1000-1)
-#define REQ_RD_NHEADERS 10
 
 #define REQ_RD_TEXTFREE(req) ((req)->hr_text_size - ((req)->hr_text_endp - (req)->hr_text))
 
@@ -111,15 +110,10 @@ int request_read(int servsock_fd, int conn_fd, httpreq_t *req) {
       /* resize text buffer if necessary */
       bytes_free = REQ_RD_TEXTFREE(req);
       if (bytes_free == 0) {
-         char *newtext;
-         newtext = realloc(req->hr_text, req->hr_text_size * 2);
-         if (newtext == NULL) {
-            perror("realloc");
+         if (request_resize_text(req->hr_text_size * 2, req) < 0) {
+            perror("request_resize_text");
             return REQ_RD_RERROR;
          }
-         req->hr_text_size *= 2;
-         req->hr_text_endp += newtext - req->hr_text;
-         req->hr_text = newtext;
          bytes_free = REQ_RD_TEXTFREE(req); // update free byte count
       }
 
@@ -155,47 +149,37 @@ int request_read(int servsock_fd, int conn_fd, httpreq_t *req) {
 }
 
 
-// convert string to method
-httpreq_method_t hr_str2meth(const char *str) {
-   typedef struct {
-      const char *str;
-      httpreq_method_t meth;
-   } str2meth_t;
-   
-   str2meth_t str2meth[] = {
-      {"GET", HR_M_GET},
-      {0,            0}
-   };
 
-   for (str2meth_t *it = str2meth; it->str; ++it) {
+typedef struct {
+   const char *str;
+   httpreq_method_t meth;
+} hr_str2meth_t;
+
+static hr_str2meth_t hr_str2meth_v[] = {
+   {"GET", HR_M_GET},
+   {0,            0}
+};
+
+
+httpreq_method_t hr_str2meth(const char *str) {
+   for (hr_str2meth_t *it = hr_str2meth_v; it->str; ++it) {
       if (strcmp(it->str, str) == 0) {
          return it->meth;
       }
    }
-
    return -1;
 }
 
-#define strprefix(s1, s2)   (!strncmp(s1, s2, strlen(s1))) // is s1 a prefix of s2?
-#define strskip(s1, s2)     (strprefix(s1, s2) ? s2 + strlen(s1) : NULL) // consume prefix
-
-char *strstrip(char *str, char *strip) {
-   while (*str && strchr(strip, *str)) {
-      ++str;
+const char * hr_meth2str(httpreq_method_t meth) {
+   for (hr_str2meth_t *it = hr_str2meth_v; it->str; ++it) {
+      if (meth == it->meth) {
+         return it->str;
+      }
    }
-   return str;
-}
-char *strrstrip(char *str, char *strip) {
-   char *str_it;
-   for (str_it = strchr(str, '\0'); str_it > str && strchr(strip, str[-1]); --str_it) {}
-   *str_it = '\0';
-   return str;
+   return NULL;
 }
 
-char *strstrip(char *str, char *strip);
-char *strrstrip(char *str, char *strip);
 
-#define REQ_PRS_HTTP_PREFIX "HTTP/"
 int request_parse(httpreq_t *req) {
    char *saveptr_text;
 
@@ -234,23 +218,15 @@ int request_parse(httpreq_t *req) {
 
       /* check if array full */
       if (header_it == req->hr_headers + req->hr_nheaders) {
-         /* expand header size */
-         httpreq_header_t *newheaders;
-         size_t new_nheaders;
-         size_t header_i;
+         size_t header_i = header_it - req->hr_headers; // current index
+         size_t new_nheaders = req->hr_nheaders * 2;
 
-         header_i = header_it - req->hr_headers; // current index
-         new_nheaders = req->hr_nheaders * 2;
-         newheaders = realloc(req->hr_headers, (new_nheaders+1) * sizeof(httpreq_header_t));
-         if (newheaders == NULL) {
+         /* expand header size */
+         if (request_resize_headers(new_nheaders, req) < 0) {
             return REQ_PRS_RERROR;
          }
-         req->hr_headers = newheaders;
-         header_it = newheaders + header_i; // update header iterator
-         
-         /* zero out uninitialized memory */
-         memset(header_it+1, 0, sizeof(httpreq_header_t) * (new_nheaders - req->hr_nheaders));
-         req->hr_nheaders = new_nheaders;
+
+         header_it = req->hr_headers + header_i; // update header iterator         
       }
       
       /* parse single request header */
@@ -280,4 +256,39 @@ void request_delete(httpreq_t *req) {
       /* free request */
       free(req);
    }
+}
+
+int request_resize_headers(size_t new_nheaders, httpreq_t *req) {
+   httpreq_header_t *newheaders;
+
+   /* reallocate headers array */
+   newheaders = realloc(req->hr_headers, (new_nheaders+1) * sizeof(httpreq_header_t));
+   if (newheaders == NULL) {
+      return -1;
+   }
+   req->hr_headers = newheaders;
+   
+   /* zero out uninitialized memory */
+   if (new_nheaders > req->hr_nheaders) {
+      memset(newheaders + req->hr_nheaders + 1, 0,
+             sizeof(httpreq_header_t) * (new_nheaders - req->hr_nheaders));
+   }
+   req->hr_nheaders = new_nheaders;
+
+   return 0;
+}
+
+int request_resize_text(size_t newsize, httpreq_t *req) {
+   char *newtext;
+
+   /* reallocate text buffer */
+   newtext = realloc(req->hr_text, newsize + 1);
+   if (newtext == NULL) {
+      return -1;
+   }
+   req->hr_text_size = newsize;
+   req->hr_text_endp += newtext - req->hr_text;
+   req->hr_text = newtext;
+
+   return 0;
 }
