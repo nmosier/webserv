@@ -5,11 +5,11 @@ LIBFLAGS=-L. -lwebserv
 .PHONY: all
 all: webserv-multi
 
-libwebserv.so: webserv-lib.o
+libwebserv.so: webserv-lib.o webserv-util.o
 	gcc $(SOFLAGS) -o $@ $^
 
 webserv-multi: webserv-multi.o libwebserv.so
-	gcc $(LIBFLAGS) -o $@ $@.o
+	gcc -o $@ $@.o $(LIBFLAGS)
 
 webserv-multi.o: webserv-multi.c webserv-multi.h
 	gcc $(OFLAGS) -pthread -o $@ webserv-multi.c
