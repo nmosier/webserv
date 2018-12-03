@@ -34,13 +34,13 @@ int main(int argc, char *argv[]) {
    printf("client_fd=%d\n", client_fd);
 
    /* get HTTP request */
-   httpreq_t *req = malloc(sizeof(httpreq_t));
+   httpmsg_t *req = malloc(sizeof(httpmsg_t));
    if (req == NULL) {
       perror("malloc");
       exit(1);
    }
-   if (request_init(req) < 0) {
-      perror("request_init");
+   if (message_init(req) < 0) {
+      perror("message_init");
       exit(2);
    }
    
@@ -51,25 +51,25 @@ int main(int argc, char *argv[]) {
 
    printf("request_read status: %d\n", req_stat);
    if (req_stat == REQ_RD_RSUCCESS) {
-      printf("HTTP REQUEST:\n%s\n", req->hr_text);
+      printf("HTTP REQUEST:\n%s\n", req->hm_text);
    }
 
    /* parse request */
    int parse_stat = request_parse(req);
    printf("request_parse status: %d\n", parse_stat);
    if (parse_stat == REQ_PRS_RSUCCESS) {
-      printf("mode = %d, URI = %s, version = %s\n", req->hr_line.method,
-             req->hr_line.uri, req->hr_line.version);
+      printf("mode = %d, URI = %s, version = %s\n", req->hm_line.reql.method,
+             req->hm_line.reql.uri, req->hm_line.reql.version);
    }
 
    /* print out headers*/
    printf("HEADERS\n");
-   for (httpreq_header_t *header_it = req->hr_headers;
+   for (httpmsg_header_t *header_it = req->hm_headers;
         header_it->key; ++header_it) {
-      printf("%s:\t%s\n", header_it->key, header_it->value);
+      printf("%s:\t%s\n", HM_OFF2STR(header_it->key, req), HM_OFF2STR(header_it->value, req));
    }
 
-   request_delete(req);
+   message_delete(req);
    
    exit(0);
 }

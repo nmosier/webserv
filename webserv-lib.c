@@ -75,31 +75,32 @@ int server_start(const char *port, int backlog) {
 // returns -1 & error EAGAIN or EWOULDBLOCK if not available
 // if *req is null, then create new. Else resume read.
 
-#define REQ_RD_TEXTFREE(req) ((req)->hr_text_size - ((req)->hr_text_endp - (req)->hr_text))
+#define MSG_TEXTFREE(req) ((req)->hm_text_size - ((req)->hm_text_endp - (req)->hm_text))
 
-int request_init(httpreq_t *req) {
+int message_init(httpmsg_t *msg) {
    /* zero out struct */
-   memset(req, 0, sizeof(httpreq_t));
+   memset(msg, 0, sizeof(httpmsg_t));
 
    /* allocate & initialize buffer */
-   req->hr_text_size = REQ_RD_BUFSIZE;
-   req->hr_text_endp = req->hr_text = malloc(req->hr_text_size + 1); // +1 for null terminator
-   if (req->hr_text == NULL) {
+   msg->hm_text_endp = msg->hm_text = malloc(HTTPMSG_TEXTSZ + 1); // +1 for null terminator
+   if (msg->hm_text == NULL) {
       return -1;
    }
+   msg->hm_text_size = HTTPMSG_TEXTSZ;
    
    /* allocate & initialize headers */
-   req->hr_headers = calloc(REQ_RD_NHEADERS + 1, sizeof(httpreq_header_t)); // +1 for null term.
-   if (req->hr_headers == NULL) {
+   msg->hm_headers = msg->hm_headers_endp = calloc(HTTPMSG_NHEADS,
+                                                   sizeof(httpmsg_header_t));
+   if (msg->hm_headers == NULL) {
       return -1;
    }
-   req->hr_nheaders = REQ_RD_NHEADERS;
+   msg->hm_nheaders = HTTPMSG_NHEADS;
 
    return 0;
 }
 
 
-int request_read(int servsock_fd, int conn_fd, httpreq_t *req) {
+int request_read(int servsock_fd, int conn_fd, httpmsg_t *req) {
    int msg_done;
    ssize_t bytes_received;
    size_t bytes_free;
@@ -108,27 +109,27 @@ int request_read(int servsock_fd, int conn_fd, httpreq_t *req) {
    msg_done = 0; // whether terminating \r\n has been encountered
    do {
       /* resize text buffer if necessary */
-      bytes_free = REQ_RD_TEXTFREE(req);
+      bytes_free = MSG_TEXTFREE(req);
       if (bytes_free == 0) {
-         if (request_resize_text(req->hr_text_size * 2, req) < 0) {
+         if (message_resize_text(req->hm_text_size * 2, req) < 0) {
             perror("request_resize_text");
             return REQ_RD_RERROR;
          }
-         bytes_free = REQ_RD_TEXTFREE(req); // update free byte count
+         bytes_free = MSG_TEXTFREE(req); // update free byte count
       }
 
       /* receive bytes */
-      bytes_received = recv(conn_fd, req->hr_text_endp, bytes_free, MSG_DONTWAIT);
+      bytes_received = recv(conn_fd, req->hm_text_endp, bytes_free, MSG_DONTWAIT);
 
       /* if bytes received, update request fields */
       if (bytes_received > 0) {
          /* update text buffer fields */
-         req->hr_text_endp += bytes_received;
-         *(req->hr_text_endp) = '\0';
+         req->hm_text_endp += bytes_received;
+         *(req->hm_text_endp) = '\0';
          
          /* check for terminating line */
-         if (req->hr_text_endp - req->hr_text >= 4 &&
-             strcmp("\r\n\r\n", req->hr_text_endp - 4) == 0) {
+         if (req->hm_text_endp - req->hm_text >= 4 &&
+             strcmp("\r\n\r\n", req->hm_text_endp - 4) == 0) {
             msg_done = 1;
          }
       }
@@ -180,115 +181,175 @@ const char * hr_meth2str(httpreq_method_t meth) {
 }
 
 
-int request_parse(httpreq_t *req) {
+int request_parse(httpmsg_t *req) {
    char *saveptr_text;
 
    ////////// PARSE REQUEST LINE /////////
    char *req_line, *req_method_str, *req_version;
-   req_line = strtok_r(req->hr_text, "\n", &saveptr_text); // has trailing '\r'
+   req_line = strtok_r(req->hm_text, "\n", &saveptr_text); // has trailing '\r'
 
    /* parse request line method */
    if ((req_method_str = strtok(req_line, " "))) {
-      req->hr_line.method = hr_str2meth(req_method_str);
+      req->hm_line.reql.method = hr_str2meth(req_method_str);
    }
-   if (req_method_str == NULL || req->hr_line.method < 0) {
+   if (req_method_str == NULL || req->hm_line.reql.method < 0) {
       return REQ_PRS_RSYNTAX;
    }
 
    /* parse request line URI */
-   if ((req->hr_line.uri = strtok(NULL, " ")) == NULL) {
+   if ((req->hm_line.reql.uri = strtok(NULL, " ")) == NULL) {
       return REQ_PRS_RSYNTAX;
    }
 
    /* parse request line HTTP version */
    req_version = strtok(NULL, "\r"); // last item in line
-   if (req_version && (req->hr_line.version = strskip("HTTP/", req_version))) {
+   if (req_version && (req->hm_line.reql.version = strskip("HTTP/", req_version))) {
    } else {
       return REQ_PRS_RSYNTAX;
    }
    
    ///////// PARSE REQUEST HEADERS /////////
-   httpreq_header_t *header_it;
-   char *header_value;
-   char *header_str;
-   for (header_it = req->hr_headers;
+   httpmsg_header_t *header_it;
+   char *header_str, *val_str, *key_str;
+   for (header_it = req->hm_headers;
         (header_str = strtok_r(NULL, "\n", &saveptr_text))
            && strcmp(header_str, "\r");
         ++header_it) {
 
       /* check if array full */
-      if (header_it == req->hr_headers + req->hr_nheaders) {
-         size_t header_i = header_it - req->hr_headers; // current index
-         size_t new_nheaders = req->hr_nheaders * 2;
+      if (header_it == req->hm_headers + req->hm_nheaders) {
+         size_t header_i = header_it - req->hm_headers; // current index
+         size_t new_nheaders = req->hm_nheaders * 2;
 
          /* expand header size */
-         if (request_resize_headers(new_nheaders, req) < 0) {
+         if (message_resize_headers(new_nheaders, req) < 0) {
             return REQ_PRS_RERROR;
          }
 
-         header_it = req->hr_headers + header_i; // update header iterator         
+         header_it = req->hm_headers + header_i; // update header iterator         
       }
       
       /* parse single request header */
 
       /* get key */
-      if ((header_it->key = strtok(header_str, ":")) == NULL) {
+      if ((key_str = strtok(header_str, ":")) == NULL) {
          return REQ_PRS_RSYNTAX;
       }
       /* get value */
-      if ((header_value = strtok(NULL, "\r")) == NULL) {
+      if ((val_str = strtok(NULL, "\r")) == NULL) {
          return REQ_PRS_RSYNTAX;
       } else {
          /* strip leading whitespace */
-         header_it->value = strstrip(header_value, " ");
+         val_str = strstrip(val_str, " ");
       }
+      /* set key & value */
+      header_it->key = HM_STR2OFF(key_str, req);
+      header_it->value = HM_STR2OFF(val_str, req);
    }
    
    return REQ_PRS_RSUCCESS;
 }
 
-void request_delete(httpreq_t *req) {
-   if (req) {
+void message_delete(httpmsg_t *msg) {
+   if (msg) {
       /* free members */
-      free(req->hr_headers);
-      free(req->hr_text);
+      free(msg->hm_headers);
+      free(msg->hm_text);
       
       /* free request */
-      free(req);
+      free(msg);
    }
 }
 
-int request_resize_headers(size_t new_nheaders, httpreq_t *req) {
-   httpreq_header_t *newheaders;
+int message_resize_headers(size_t new_nheaders, httpmsg_t *msg) {
+   httpmsg_header_t *newheaders;
 
    /* reallocate headers array */
-   newheaders = realloc(req->hr_headers, (new_nheaders+1) * sizeof(httpreq_header_t));
+   newheaders = realloc(msg->hm_headers, (new_nheaders+1) * sizeof(httpmsg_header_t));
    if (newheaders == NULL) {
       return -1;
    }
-   req->hr_headers = newheaders;
+   msg->hm_headers = newheaders;
    
    /* zero out uninitialized memory */
-   if (new_nheaders > req->hr_nheaders) {
-      memset(newheaders + req->hr_nheaders + 1, 0,
-             sizeof(httpreq_header_t) * (new_nheaders - req->hr_nheaders));
+   if (new_nheaders > msg->hm_nheaders) {
+      memset(newheaders + msg->hm_nheaders + 1, 0,
+             sizeof(httpmsg_header_t) * (new_nheaders - msg->hm_nheaders));
+   } else {
+      /* zero out last element */
+      memset(newheaders + new_nheaders, 0, sizeof(httpmsg_header_t));
    }
-   req->hr_nheaders = new_nheaders;
+   msg->hm_nheaders = new_nheaders;
 
    return 0;
 }
 
-int request_resize_text(size_t newsize, httpreq_t *req) {
+int message_resize_text(size_t newsize, httpmsg_t *msg) {
    char *newtext;
 
    /* reallocate text buffer */
-   newtext = realloc(req->hr_text, newsize + 1);
+   newtext = realloc(msg->hm_text, newsize + 1);
    if (newtext == NULL) {
       return -1;
    }
-   req->hr_text_size = newsize;
-   req->hr_text_endp += newtext - req->hr_text;
-   req->hr_text = newtext;
+   msg->hm_text_size = newsize;
+   msg->hm_text_endp += newtext - msg->hm_text;
+   msg->hm_text = newtext;
 
+   return 0;
+}
+
+
+static httpres_stat_t hr_stats[] = {
+   {200, "OK"},
+   {404, "Not found"}
+};
+
+
+
+
+/// response stuff
+int response_header_insert(const char *key, const char *val, httpmsg_t *res) {
+   httpmsg_header_t *hdr_it;
+   size_t key_len, val_len;
+   char *text_ptr;
+
+   /* resize if full */
+   if (res->hm_headers_endp == res->hm_headers + res->hm_nheaders) {
+      if (message_resize_headers(res->hm_nheaders * 2, res) < 0) {
+         perror("message_resize_headers");
+         return -1;
+      }
+   }
+   
+   /* find next available element */
+   for (hdr_it = res->hm_headers; hdr_it < res->hm_headers_endp; ++hdr_it) {}
+   
+   /* find length of header's underlying strings */
+   key_len = strlen(key) + 1;
+   val_len = strlen(val) + 1;
+
+   /* make sure there's enough space to copy strings into response */
+   if (MSG_TEXTFREE(res) < key_len + val_len) {
+      if (message_resize_text(res->hm_text_size * 2, res) < 0) {
+         perror("message_resize_text");
+         return -1;
+      }
+   }
+   text_ptr = res->hm_text_endp + 1; // +1 so previous strings are terminated by '\0'
+
+   /* copy header key string & pointer */
+   memcpy(text_ptr, key, key_len); // +1 for null terminator
+   hdr_it->key = HM_STR2OFF(text_ptr, res);
+
+   text_ptr += key_len;
+   
+   /* copy header into array */
+   memcpy(text_ptr, val, val_len);
+   hdr_it->value = HM_STR2OFF(text_ptr, res);
+
+   res->hm_text_endp += key_len + val_len;
+   ++res->hm_headers_endp;
+   
    return 0;
 }
