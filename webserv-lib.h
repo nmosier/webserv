@@ -2,6 +2,7 @@
 
 /* HTTP request methods */
 typedef enum {
+   HR_M_NONE = 0,
    HR_M_GET
 } httpreq_method_t;
 
@@ -28,8 +29,6 @@ typedef struct {
 typedef struct {
    off_t key;
    off_t value;
-   //   char *key;
-   //char *value;
 } httpmsg_header_t;
 
 /* HTTP message */
@@ -41,6 +40,7 @@ typedef struct {
    httpmsg_header_t *hm_headers; // null-termianted array of headers
    int hm_nheaders;
    httpmsg_header_t *hm_headers_endp;
+   off_t hm_body;
    char *hm_text; // request as unparsed string
    size_t hm_text_size;
    char *hm_text_endp; // ptr to end of string
@@ -56,6 +56,7 @@ int message_resize_headers(size_t new_nheaders, httpmsg_t *req);
 int message_resize_text(size_t newsize, httpmsg_t *req);
 
 int response_header_insert(const char *key, const char *val, httpmsg_t *res);
+int response_body_insert(const char *body, httpmsg_t *res);
 
 const char *hr_meth2str(httpreq_method_t meth);
 httpreq_method_t hr_str2meth(const char *str);
@@ -78,3 +79,12 @@ enum {
 
 #define HM_OFF2STR(off, msg)  (msg->hm_text + off)
 #define HM_STR2OFF(str, msg)  (str - msg->hm_text)
+
+#define HM_TEXTFREE(req) ((req)->hm_text_size - ((req)->hm_text_endp - (req)->hm_text))
+
+
+#define HM_HDR_SEP    ": "
+#define HM_HDR_SEPLEN strlen(HM_HDR_SEP)
+#define HM_ENT_TERM   "\r\n"
+#define HM_ENT_TERMLEN strlen(HM_ENT_TERM)
+#define HM_VERSION_PREFIX "HTTP/"
