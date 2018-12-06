@@ -353,25 +353,34 @@ int response_insert_header(const char *key, const char *val, httpmsg_t *res) {
 }
 
 // now inserts content-type header too
-int response_insert_body(const char *body, const char *type, httpmsg_t *res) {
-   size_t body_len = strlen(body) + 1;
-
+int response_insert_body(const char *body, size_t bodylen, const char *type, httpmsg_t *res) {
+   char bodylen_str[INTLEN(size_t) + 1];
+   
    /* resize response's text if necessary */
-   if (HM_TEXTFREE(res) < body_len) {
+   if (HM_TEXTFREE(res) < bodylen) {
       if (message_resize_text(res->hm_text_size * 2, res) < 0) {
          return -1;
       }
    }
    
    /* copy body into response's text */
-   memcpy(res->hm_text_endp + 1, body, body_len); // +1 for null term.
+   memcpy(res->hm_text_endp + 1, body, bodylen); // +1 for null term.
 
    /* update response pointers */
    res->hm_body = HM_STR2OFF(res->hm_text_endp + 1, res);
-   res->hm_text_endp += body_len;
+   res->hm_text_endp += bodylen;
 
-   /* add content-type header */
+   /* add Content-Type header */
    if (response_insert_header(HM_HDR_CONTENTTYPE, type, res) < 0) {
+      return -1;
+   }
+
+
+   /* add Content-Length header */
+   if (sprintf(bodylen_str, "%zu", bodylen) < 0) {
+      return -1;
+   }
+   if (response_insert_header(HM_HDR_CONTENTLEN, bodylen_str, res) < 0) {
       return -1;
    }
    
@@ -465,8 +474,6 @@ int response_send(int conn_fd, httpmsg_t *res) {
    return 0;
 }
 
-#define INTLEN(itype) (sizeof(itype) * 4)
-#define HR_LAST_MODIFIED_EXAMPLE "Tue, 15 Nov 1994 08:12:31 GMT"
 // higher level operation than response_insert_body() 
 int response_insert_file(const char *path, httpmsg_t *res) {
    int fd;
@@ -475,7 +482,6 @@ int response_insert_file(const char *path, httpmsg_t *res) {
    time_t last_mod_sec;
    struct tm *last_mod;
    char *body;
-   char content_length[INTLEN(off_t) + 1];
    char last_mod_str[strlen(HR_LAST_MODIFIED_EXAMPLE)+1];
    char content_type[CONTENT_TYPE_MAXLEN];
    int sprintf_retv;
@@ -503,7 +509,7 @@ int response_insert_file(const char *path, httpmsg_t *res) {
     * (error checking is tricky here) */
    error = 0;
    get_content_type(path, content_type);
-   if (response_insert_body(body, content_type, res) < 0) {
+   if (response_insert_body(body, fd_size, content_type, res) < 0) {
       error = 1;
       saved_errno = errno;
    }
@@ -514,17 +520,7 @@ int response_insert_file(const char *path, httpmsg_t *res) {
       return -1;
    }
 
-   /* insert relevant headers: Content-Length, Last-Modified */
-   
-   /* Content-Length */
-   if (sprintf(content_length, "%ld", fd_size) < 0) {
-      return -1;
-   }
-   if (response_insert_header("Content-Length", content_length, res) < 0) {
-      return -1;
-   }
-
-   /* Last-Modified */
+   /* insert Last-Modified header */
    last_mod_sec = fd_info.st_mtim.tv_sec;
    if ((last_mod = gmtime(&last_mod_sec)) == NULL) {
       return -1;
@@ -544,12 +540,33 @@ int response_insert_file(const char *path, httpmsg_t *res) {
    return 0;
 }
 
+// genhdrs = general headers
+// TODO
+int response_insert_genhdrs(httpmsg_t *req) {
+   /* Date */
+   return -1;
+}
+
+// TODO
+int response_insert_servhdrs(httpmsg_t *req) {
+   /* Server */
+
+   /* Connection */
+   return -1;
+}
 
 int server_handle_req(int conn_fd, const char *docroot, httpmsg_t *req) {
-   return -1; // TO BE IMPLEMENTED
+   switch (req->hm_line.reql.method) {
+   case M_GET:
+      return server_handle_get(conn_fd, docroot, req);
+   default:
+      errno = EBADRQC;
+      return -1;
+   }
 }
 
 // handle GET request
+// TODO: make case statement table-driven, not switch case
 int server_handle_get(int conn_fd, const char *docroot, httpmsg_t *req) {
    httpmsg_t *res;
    char *path;
@@ -585,36 +602,45 @@ int server_handle_get(int conn_fd, const char *docroot, httpmsg_t *req) {
    }
 
    /* insert file */
-   switch (code) {
-   case C_OK:
+   if (code == C_OK) {
       if (response_insert_file(path, res) < 0) {
          message_delete(res);
          return -1;
       }
-      break;
-   case C_NOTFOUND:
-      if (response_insert_body(C_NOTFOUND_BODY, CONTENT_TYPE_PLAIN, res) < 0) {
+   } else {
+      const char *body;
+      switch (code) {
+      case C_NOTFOUND:
+         body = C_NOTFOUND_BODY;
+         break;
+      case C_FORBIDDEN:
+         body = C_FORBIDDEN_BODY;
+         break;
+      default:
+         message_delete(res);
+         errno = EBADRQC;
+         return -1;
+      }
+      if (response_insert_body(body, strlen(body), CONTENT_TYPE_PLAIN, res) < 0) {
          message_delete(res);
          return -1;
       }
-      break;
-   case C_FORBIDDEN:
-      if (response_insert_body(C_FORBIDDEN_BODY, CONTENT_TYPE_PLAIN, res) < 0) {
-         message_delete(res);
-         return -1;
-      }
-      break;
-   default:
+   }
+
+   /* set response line */
+   if (response_insert_line(code, HM_RES_VERSION, res) < 0) {
       message_delete(res);
       return -1;
    }
-
+   
    /* send request */
    if (response_send(conn_fd, res) < 0) {
       message_delete(res);
       return -1;
    }
-   
+
+   /* cleanup */
+   message_delete(res);
    return 0;
 }
 
@@ -624,14 +650,16 @@ int server_handle_get(int conn_fd, const char *docroot, httpmsg_t *req) {
 
 // USE STAT
 int document_find(const char *docroot, char *path, size_t pathlen, httpmsg_t *req) {
-   const char *resource;
+   const char *rsrc;
    int snprintf_stat;
+   struct stat rsrc_stat;
+   int st_mode;
 
    /* locate resource in request line */
-   resource = HM_OFF2STR(req->hm_line.reql.uri, req);
+   rsrc = HM_OFF2STR(req->hm_line.reql.uri, req);
 
    /* get entire path */
-   snprintf_stat = snprintf(path, pathlen, "%s/%s", docroot, resource);
+   snprintf_stat = snprintf(path, pathlen, "%s%s", docroot, rsrc);
    if (snprintf_stat >= pathlen) {
       errno = ERANGE;
       return -1;
@@ -640,11 +668,28 @@ int document_find(const char *docroot, char *path, size_t pathlen, httpmsg_t *re
       return -1;
    }
 
-   /* check if resource exists & have read permissions */
-   if (access(path, F_OK) < 0) {
-      return C_NOTFOUND;
+   fprintf(stderr, "resource=%s\n", path);
+   
+   /* stat resource */
+   if (stat(path, &rsrc_stat) < 0) {
+      switch (errno) {
+      case EACCES:
+         return C_FORBIDDEN;
+      case ENOENT:
+      case ENOTDIR:
+         return C_NOTFOUND;
+      default:
+         return -1;
+      }
    }
-   if (access(path, R_OK) < 0) {
+
+   st_mode = rsrc_stat.st_mode;
+
+   /* check if resource exists & have read permissions */
+   if (!S_ISREG(st_mode)) {
+      return C_FORBIDDEN;
+   }
+   if ((st_mode | S_IROTH) == 0) {
       return C_FORBIDDEN;
    }
 

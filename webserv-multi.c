@@ -83,15 +83,15 @@ int main(int argc, char *argv[]) {
       perror("response_insert_file");
       exit(5);
       } */
-   if (server_handle_get(client_fd, ".", req) < 0) {
+   if (server_handle_get(client_fd, DOCUMENT_ROOT, req) < 0) {
       perror("server_handle_get");
       exit(7);
    }
 
-   if (response_send(client_fd, res) < 0) {
-      perror("response_send");
-      exit(6);
-   }
+   //   if (response_send(client_fd, res) < 0) {
+   //      perror("response_send");
+   //      exit(6);
+   //   }
 
    message_delete(req);
    message_delete(res);
