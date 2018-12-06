@@ -11,6 +11,8 @@
 #include "webserv-lib.h"
 #include "webserv-multi.h"
 
+#define DOCUMENT_ROOT "/home/nmosier"
+
 int main(int argc, char *argv[]) {
    /* test server_start() */
    int server_fd;
@@ -34,12 +36,8 @@ int main(int argc, char *argv[]) {
    printf("client_fd=%d\n", client_fd);
 
    /* get HTTP request */
-   httpmsg_t *req = malloc(sizeof(httpmsg_t));
-   if (req == NULL) {
-      perror("malloc");
-      exit(1);
-   }
-   if (message_init(req) < 0) {
+   httpmsg_t *req;
+   if ((req = message_init()) == NULL) {
       perror("message_init");
       exit(2);
    }
@@ -59,7 +57,7 @@ int main(int argc, char *argv[]) {
    printf("request_parse status: %d\n", parse_stat);
    if (parse_stat == REQ_PRS_RSUCCESS) {
       printf("mode = %d, URI = %s, version = %s\n", req->hm_line.reql.method,
-             req->hm_line.reql.uri, req->hm_line.reql.version);
+             HM_OFF2STR(req->hm_line.reql.uri, req), HM_OFF2STR(req->hm_line.reql.version, req));
    }
 
    /* print out headers*/
@@ -69,7 +67,35 @@ int main(int argc, char *argv[]) {
       printf("%s:\t%s\n", HM_OFF2STR(header_it->key, req), HM_OFF2STR(header_it->value, req));
    }
 
+   httpmsg_t *res;
+   if ((res = message_init()) == NULL) {
+      perror("message_init");
+      exit(3);
+   }
+
+   if (response_insert_line(C_FORBIDDEN, "1.1", res) < 0) {
+      perror("response_insert_line");
+      exit(4);
+   }
+
+   /* 
+   if (response_insert_file("READMESS", res) < 0) {
+      perror("response_insert_file");
+      exit(5);
+      } */
+   if (server_handle_get(client_fd, ".", req) < 0) {
+      perror("server_handle_get");
+      exit(7);
+   }
+
+   if (response_send(client_fd, res) < 0) {
+      perror("response_send");
+      exit(6);
+   }
+
    message_delete(req);
+   message_delete(res);
+   close(client_fd);
    
    exit(0);
 }

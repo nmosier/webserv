@@ -2,16 +2,22 @@
 
 /* HTTP request methods */
 typedef enum {
-   HR_M_NONE = 0,
-   HR_M_GET
+   M_NONE = 0,
+   M_GET
 } httpreq_method_t;
 
 /* HTTP request line */
 typedef struct {
    httpreq_method_t method;
-   char *uri;
-   char *version; // not including leading HTTP/
+   off_t uri;
+   off_t version; // not including leading HTTP/
 } httpreq_line_t;
+
+/* HTTP response codes */
+
+#define C_OK        200
+#define C_NOTFOUND  404
+#define C_FORBIDDEN 403
 
 /* HTTP response statuses */
 typedef struct {
@@ -21,7 +27,7 @@ typedef struct {
 
 /* HTTP response line */
 typedef struct {
-   char *version; // not including leading HTTP/
+   off_t version; // not including leading HTTP/
    httpres_stat_t *status;
 } httpres_line_t;
 
@@ -48,18 +54,32 @@ typedef struct {
 
 
 int server_start(const char *port, int backlog);
-int message_init(httpmsg_t *msg);
+int server_handle_get(int conn_fd, const char *docroot, httpmsg_t *req);
+httpmsg_t *message_init();
 int request_read(int servsock_fd, int conn_fd, httpmsg_t *req);
 int request_parse(httpmsg_t *req);
 void message_delete(httpmsg_t *req);
 int message_resize_headers(size_t new_nheaders, httpmsg_t *req);
 int message_resize_text(size_t newsize, httpmsg_t *req);
 
-int response_header_insert(const char *key, const char *val, httpmsg_t *res);
-int response_body_insert(const char *body, httpmsg_t *res);
+int response_insert_line(int code, const char *version, httpmsg_t *res);
+int response_insert_header(const char *key, const char *val, httpmsg_t *res);
+int response_insert_body(const char *body, const char *type, httpmsg_t *res);
+int response_insert_file(const char *path, httpmsg_t *res);
+httpres_stat_t *response_find_status(int code);
+int response_send(int conn_fd, httpmsg_t *res);
+
+int document_find(const char *docroot, char *path, size_t pathlen, httpmsg_t *req);
 
 const char *hr_meth2str(httpreq_method_t meth);
 httpreq_method_t hr_str2meth(const char *str);
+
+enum {
+   DOC_FIND_ESUCCESS = 0,
+   DOC_FIND_EINTERNAL,
+   DOC_FIND_ENOTFOUND
+};
+
 
 enum {
    REQ_RD_RSUCCESS,
@@ -88,3 +108,10 @@ enum {
 #define HM_ENT_TERM   "\r\n"
 #define HM_ENT_TERMLEN strlen(HM_ENT_TERM)
 #define HM_VERSION_PREFIX "HTTP/"
+
+
+#define HM_HDR_CONTENTTYPE "Content-Type"
+
+
+#define C_NOTFOUND_BODY "Not Found"
+#define C_FORBIDDEN_BODY "Forbidden"
