@@ -15,7 +15,7 @@
 #include "webserv-lib.h"
 #include "webserv-util.h"
 
-#define DEBUG 1
+#define DEBUG 0
 
 // prints errors
 int server_start(const char *port, int backlog) {
@@ -365,11 +365,11 @@ int response_insert_body(const char *body, size_t bodylen, const char *type, htt
    }
    
    /* copy body into response's text */
-   memcpy(res->hm_text_endp + 1, body, bodylen); // +1 for null term.
+   memcpy(res->hm_text_endp + 1, body, bodylen + 1); // +1 for null term.
 
    /* update response pointers */
    res->hm_body = HM_STR2OFF(res->hm_text_endp + 1, res);
-   res->hm_text_endp += bodylen;
+   res->hm_text_endp += bodylen + 1;
 
    /* add Content-Type header */
    if (response_insert_header(HM_HDR_CONTENTTYPE, type, res) < 0) {
@@ -434,7 +434,10 @@ int response_send(int conn_fd, httpmsg_t *res) {
 
    /* format headers string */
    hdrs_str_len = res->hm_text_size + (HM_HDR_SEPLEN+HM_ENT_TERMLEN)*res->hm_nheaders;
-   hdrs_str = malloc(hdrs_str_len + 1); // +1 for null terminator
+   if ((hdrs_str = malloc(hdrs_str_len + 1)) == NULL) {
+      return -1;
+   }
+   
    for (hdr_it = res->hm_headers, hdrs_str_it = hdrs_str;
         hdr_it != res->hm_headers_endp;
         ++hdr_it, hdrs_str_it = strchr(hdrs_str_it, '\0')) {
@@ -459,17 +462,19 @@ int response_send(int conn_fd, httpmsg_t *res) {
                          version, status->code, status->phrase,       // line args
                          hdrs_str,                                    // header arg
                          body);                                       // body arg
-   free(hdrs_str);
-   if (send_status < 0) {
-      perror("dprintf");
-      return -1;
-   }
 
    if (DEBUG) {
       send_status = printf(res_fmt,
                            version, status->code, status->phrase,       // line args
                            hdrs_str,                                    // header arg
                            body);                                       // body arg
+   }
+
+
+   free(hdrs_str);
+   if (send_status < 0) {
+      perror("dprintf");
+      return -1;
    }
    
    return 0;
@@ -558,15 +563,26 @@ int response_insert_genhdrs(httpmsg_t *res) {
 int response_insert_servhdrs(const char *servname, httpmsg_t *res) {
    struct utsname sysinfo;
    char *serv;
-   size_t servlen;
    
    /* Server */
    if (uname(&sysinfo) < 0) {
       return -1;
    }
+   if (smprintf(&serv, "%s/%s %s", sysinfo.sysname, sysinfo.release, servname) < 0) {
+      return -1;
+   }
+   if (response_insert_header(HM_HDR_SERVER, serv, res) < 0) {
+      free(serv);
+      return -1;
+   }
+   free(serv);
 
    /* Connection */
-   return -1;
+   if (response_insert_header(HM_HDR_CONNECTION, "close", res) < 0) {
+      return -1;
+   }
+   
+   return 0;
 }
 
 int server_handle_req(int conn_fd, const char *docroot, httpmsg_t *req) {
@@ -584,7 +600,6 @@ int server_handle_req(int conn_fd, const char *docroot, httpmsg_t *req) {
 int server_handle_get(int conn_fd, const char *docroot, httpmsg_t *req) {
    httpmsg_t *res;
    char *path;
-   size_t pathlen;
    int code;
 
    /* create response */
@@ -592,33 +607,17 @@ int server_handle_get(int conn_fd, const char *docroot, httpmsg_t *req) {
       return -1;
    }
    
-   /* find resource & set response code */
-   /* see Advanced Unix Programming (3rd ed.), p. 50 */
-   pathlen = PATH_MAX;
-   if ((path = malloc(pathlen)) == NULL) {
+   /* get response code & full path */
+   if ((code = document_find(docroot, &path, req)) < 0) {
       message_delete(res);
       return -1;
    }
-   while ((code = document_find(docroot, path, pathlen, req)) < 0 && errno == ERANGE) {
-      char *pathtmp;
-      pathlen *= 2;
-      if ((pathtmp = realloc(path, pathlen)) == NULL) {
-         free(path);
-         return -1;
-      }
-      path = pathtmp;
-   }
-
-   /* handle any errors */
-   if (path == NULL || code < 0) {
-      message_delete(res);
-      return -1;
-   }
-
+      
    /* insert file */
    if (code == C_OK) {
       if (response_insert_file(path, res) < 0) {
          message_delete(res);
+         free(path);
          return -1;
       }
    } else {
@@ -661,17 +660,16 @@ int server_handle_get(int conn_fd, const char *docroot, httpmsg_t *req) {
 
    /* cleanup */
    message_delete(res);
+   free(path);
    return 0;
 }
 
 
 // finds document
-// ERRORS: ERANGE
-
-// USE STAT
-int document_find(const char *docroot, char *path, size_t pathlen, httpmsg_t *req) {
+// returns response code & completes path
+// NOTE: pathp ONLY malloc()ed if retval is C_OK
+int document_find(const char *docroot, char **pathp, httpmsg_t *req) {
    const char *rsrc;
-   int snprintf_stat;
    struct stat rsrc_stat;
    int st_mode;
 
@@ -679,19 +677,13 @@ int document_find(const char *docroot, char *path, size_t pathlen, httpmsg_t *re
    rsrc = HM_OFF2STR(req->hm_line.reql.uri, req);
 
    /* get entire path */
-   snprintf_stat = snprintf(path, pathlen, "%s%s", docroot, rsrc);
-   if (snprintf_stat >= pathlen) {
-      errno = ERANGE;
-      return -1;
-   }
-   if (snprintf_stat < 0) {
+   if (smprintf(pathp, "%s%s", docroot, rsrc) < 0) {
       return -1;
    }
 
-   fprintf(stderr, "resource=%s\n", path);
-   
    /* stat resource */
-   if (stat(path, &rsrc_stat) < 0) {
+   if (stat(*pathp, &rsrc_stat) < 0) {
+      free(*pathp);
       switch (errno) {
       case EACCES:
          return C_FORBIDDEN;
@@ -706,13 +698,12 @@ int document_find(const char *docroot, char *path, size_t pathlen, httpmsg_t *re
    st_mode = rsrc_stat.st_mode;
 
    /* check if resource exists & have read permissions */
-   if (!S_ISREG(st_mode)) {
-      return C_FORBIDDEN;
-   }
-   if ((st_mode | S_IROTH) == 0) {
+   if (!(S_ISREG(st_mode) && (st_mode | S_IROTH))) {
+      free(*pathp);
       return C_FORBIDDEN;
    }
 
+   /* only here does pathp remain allocated */
    return C_OK;
 }
 

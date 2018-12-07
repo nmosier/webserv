@@ -71,7 +71,7 @@ int response_insert_genhdrs(httpmsg_t *res);
 httpres_stat_t *response_find_status(int code);
 int response_send(int conn_fd, httpmsg_t *res);
 
-int document_find(const char *docroot, char *path, size_t pathlen, httpmsg_t *req);
+int document_find(const char *docroot, char **pathp, httpmsg_t *req);
 
 const char *hr_meth2str(httpreq_method_t meth);
 httpreq_method_t hr_str2meth(const char *str);
@@ -117,8 +117,9 @@ enum {
 #define HM_HDR_LASTMODIFIED "Last-Modified"
 #define HM_HDR_DATE         "Date"
 #define HM_HDR_SERVER       "Server"
+#define HM_HDR_CONNECTION   "Connection"
 
-#define HM_HDR_LASTMODIFIED_EXAMPLE "Tue, 15 Nov 1994 08:12:31 GMT"
+//#define HM_HDR_LASTMODIFIED_EXAMPLE "Tue, 15 Nov 1994 08:12:31 GMT"
 
 #define C_NOTFOUND_BODY  "Not Found"
 #define C_FORBIDDEN_BODY "Forbidden"
