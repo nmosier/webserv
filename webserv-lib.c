@@ -11,6 +11,7 @@
 #include <sys/mman.h>
 #include <time.h>
 #include <fcntl.h>
+#include <sys/utsname.h>
 #include "webserv-lib.h"
 #include "webserv-util.h"
 
@@ -479,12 +480,9 @@ int response_insert_file(const char *path, httpmsg_t *res) {
    int fd;
    struct stat fd_info;
    off_t fd_size;
-   time_t last_mod_sec;
-   struct tm *last_mod;
+   char *last_mod;
    char *body;
-   char last_mod_str[strlen(HR_LAST_MODIFIED_EXAMPLE)+1];
    char content_type[CONTENT_TYPE_MAXLEN];
-   int sprintf_retv;
    int saved_errno, error;
 
    /* open file */
@@ -521,35 +519,51 @@ int response_insert_file(const char *path, httpmsg_t *res) {
    }
 
    /* insert Last-Modified header */
-   last_mod_sec = fd_info.st_mtim.tv_sec;
-   if ((last_mod = gmtime(&last_mod_sec)) == NULL) {
+   if (hm_fmtdate(&fd_info.st_mtim.tv_sec, &last_mod) < 0) {
       return -1;
    }
-   sprintf_retv = sprintf(last_mod_str,
-                          "%3.3s, %02d %3.3s %04d %02d:%02d:%02d GMT",
-                          tm_wday2str(last_mod->tm_wday),      last_mod->tm_mday,
-                          tm_mon2str(last_mod->tm_mon),        last_mod->tm_year,
-                          last_mod->tm_hour, last_mod->tm_min, last_mod->tm_sec);
-   if (sprintf_retv < 0) {
-      return -1;
-   }
-   if (response_insert_header("Last-Modified", last_mod_str, res) < 0) {
+   if (response_insert_header(HM_HDR_LASTMODIFIED, last_mod, res) < 0) {
+      free(last_mod);
       return -1;
    }
 
+   /* cleanup */
+   free(last_mod);
+   
    return 0;
 }
 
 // genhdrs = general headers
-// TODO
-int response_insert_genhdrs(httpmsg_t *req) {
+int response_insert_genhdrs(httpmsg_t *res) {
+   time_t curtime;
+   char *date;
+
    /* Date */
-   return -1;
+   curtime = time(NULL);
+   if (hm_fmtdate(&curtime, &date) < 0) {
+      return -1;
+   }
+   if (response_insert_header(HM_HDR_DATE, date, res) < 0) {
+      free(date);
+      return -1;
+   }
+
+   /* cleanup */
+   free(date);
+   
+   return 0;
 }
 
 // TODO
-int response_insert_servhdrs(httpmsg_t *req) {
+int response_insert_servhdrs(const char *servname, httpmsg_t *res) {
+   struct utsname sysinfo;
+   char *serv;
+   size_t servlen;
+   
    /* Server */
+   if (uname(&sysinfo) < 0) {
+      return -1;
+   }
 
    /* Connection */
    return -1;
@@ -621,12 +635,18 @@ int server_handle_get(int conn_fd, const char *docroot, httpmsg_t *req) {
          errno = EBADRQC;
          return -1;
       }
-      if (response_insert_body(body, strlen(body), CONTENT_TYPE_PLAIN, res) < 0) {
+      if (response_insert_body(body, strlen(body)+1, CONTENT_TYPE_PLAIN, res) < 0) {
          message_delete(res);
          return -1;
       }
    }
 
+   /* insert general headers */
+   if (response_insert_genhdrs(res) < 0) {
+      message_delete(res);
+      return -1;
+   }
+   
    /* set response line */
    if (response_insert_line(code, HM_RES_VERSION, res) < 0) {
       message_delete(res);

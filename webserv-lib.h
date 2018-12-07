@@ -66,6 +66,8 @@ int response_insert_line(int code, const char *version, httpmsg_t *res);
 int response_insert_header(const char *key, const char *val, httpmsg_t *res);
 int response_insert_body(const char *body, size_t bodylen, const char *type, httpmsg_t *res);
 int response_insert_file(const char *path, httpmsg_t *res);
+int response_insert_genhdrs(httpmsg_t *res);
+
 httpres_stat_t *response_find_status(int code);
 int response_send(int conn_fd, httpmsg_t *res);
 
@@ -110,14 +112,18 @@ enum {
 #define HM_VERSION_PREFIX "HTTP/"
 
 
-#define HM_HDR_CONTENTTYPE "Content-Type"
-#define HM_HDR_CONTENTLEN  "Content-Length"
+#define HM_HDR_CONTENTTYPE  "Content-Type"
+#define HM_HDR_CONTENTLEN   "Content-Length"
+#define HM_HDR_LASTMODIFIED "Last-Modified"
+#define HM_HDR_DATE         "Date"
+#define HM_HDR_SERVER       "Server"
 
-#define C_NOTFOUND_BODY "Not Found"
+#define HM_HDR_LASTMODIFIED_EXAMPLE "Tue, 15 Nov 1994 08:12:31 GMT"
+
+#define C_NOTFOUND_BODY  "Not Found"
 #define C_FORBIDDEN_BODY "Forbidden"
 
 #define HM_RES_VERSION "1.1"
 
 
 #define INTLEN(itype) (sizeof(itype) * 4)
-#define HR_LAST_MODIFIED_EXAMPLE "Tue, 15 Nov 1994 08:12:31 GMT"
