@@ -36,4 +36,7 @@ char *get_content_type(const char *path, char *type);
 
 int hm_fmtdate(const time_t *sec_ptr, char **time_str);
 
+size_t smin(size_t s1, size_t s2);
+size_t smax(size_t s1, size_t s2);
+
 #endif

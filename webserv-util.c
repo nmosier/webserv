@@ -92,3 +92,12 @@ char *get_content_type(const char *path, char *type) {
 
    return strcpy(type, extension);
 }
+
+
+size_t smax(size_t s1, size_t s2) {
+   return (s1 < s2) ? s2 : s1;
+}
+
+size_t smin(size_t s1, size_t s2) {
+   return (s1 < s2) ? s1 : s2;
+}
