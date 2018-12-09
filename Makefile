@@ -11,6 +11,9 @@ libwebserv.so: webserv-lib.o webserv-util.o
 webserv-multi: webserv-multi.o libwebserv.so
 	gcc -o $@ $@.o $(LIBFLAGS)
 
+webserv-single: webserv-single.o libwebserv.so
+	gcc -o $@ $@.o $(LIBFLAGS) -pthread
+
 webserv-multi.o: webserv-multi.c webserv-multi.h webserv-lib.h
 	gcc $(OFLAGS) -pthread -o $@ webserv-multi.c
 
