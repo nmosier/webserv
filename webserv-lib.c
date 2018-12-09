@@ -349,7 +349,7 @@ int response_insert_body(const char *body, size_t bodylen, const char *type, htt
    
    /* resize response's text if necessary */
    if (HM_TEXTFREE(res) < bodylen) {
-      if (message_resize_text(res->hm_text_size + bodylen - HM_TEXTFREE(res), res) < 0) {
+      if (message_resize_text(res->hm_text_size + (bodylen + 1) - HM_TEXTFREE(res), res) < 0) {
          return -1;
       }
    }
@@ -442,7 +442,7 @@ int response_send(int conn_fd, httpmsg_t *res) {
    /* format & send message header */
    res_fmt =
       HM_VERSION_PREFIX"%s %d %s"HM_ENT_TERM   // response line
-      "%s"HM_ENT_TERM,                         // response headers
+      "%s"HM_ENT_TERM                          // response headers
       "%s";                                    // response body
    line = &res->hm_line.resl;
    status = line->status;
