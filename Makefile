@@ -3,7 +3,7 @@ SOFLAGS=-shared
 LIBFLAGS=-L. -lwebserv
 
 .PHONY: all
-all: webserv-multi
+all: webserv-multi webserv-single
 
 libwebserv.so: webserv-lib.o webserv-util.o
 	gcc $(SOFLAGS) -o $@ $^

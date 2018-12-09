@@ -1,3 +1,7 @@
+
+QUESTIONS:
+ * Would it make sense to dedicate a second thread in the "single-threaded" server to listen for new connections?
+
 RESOURCES:
  * https://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html
  * https://www.scottklement.com/rpg/socktut/nonblocking.html
