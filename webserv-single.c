@@ -1,6 +1,16 @@
 #include <stdlib.h>
+#include <malloc.h>
+#include <errno.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
+#include <poll.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <netinet/in.h>
+#include "webserv-lib.h"
+#include "webserv-util.h"
+#include "webserv-single.h"
 
 #define DOCUMENT_ROOT "/home/nmosier"
 #define SERVER_NAME "webserv-single/1.0"
@@ -8,13 +18,7 @@
 #define PORT "1024"
 #define BACKLOG 10
 
-int pollfds_init(pollfds_t *pfds);
-int pollfds_resize(size_t newlen, pollfds_t *pfds);
-int pollfds_insert(int fd, int events, pollfds_t *pfds);
-ssize_t pollfds_pack(size_t index, pollfds_t *pfds);
-int pollfds_cleanup(pollfds_t *pfds);
-
-int server_loop();
+#define DEBUG 1
 
 int main(int argc, char *argv[]) {
    int optc;
@@ -49,74 +53,153 @@ int main(int argc, char *argv[]) {
       fprintf(stderr, "%s: failed to start server; exiting.\n", argv[0]);
       exit(2);
    }
-
-   if (server_loop() < 0) {
+   
+   if (server_loop(servfd) < 0) {
       fprintf(stderr, "%s: internal error occurred; exiting.\n", argv[0]);
       exit(3);
    }
-
-
-   
-   do {
-      addrlen = sizeof(client_sa);
-      client_fd = accept(server_fd, (struct sockaddr *) &client_sa, &addrlen);
-   } while (client_fd < 0 && (errno == EAGAIN || errno == EWOULDBLOCK));
-
    
    exit(0);
 }
 
-typedef struct {
-   struct pollfd *fds;
-   size_t len; // length of allocated array
-   size_t count; // number of fds currently in array
-} pollfds_t;
 
+// TODO: make it so it doesn't close servfd
 int server_loop(int servfd) {
-   pollfds_t pfds;
-   socklen_t addrlen;
+   httpfds_t hfds;
+   int retv;
 
+   retv = 0;
+   
    /* initialize client socket list */
-   if (pollfds_init(&pfds) < 0) {
-      perror("pollfds_init");
-      return -1;
-   }
+   httpfds_init(&hfds);
    
    /* insert server socket to list */
-   if ((serv_i = pollfds_insert(servfd, POLLIN, &pfds)) < 0) {
-      perror("pollfds_insert");
-      goto cleanup;
+   if (httpfds_insert(servfd, POLLIN, &hfds) < 0) {
+      perror("httpfds_insert");
+      if (httpfds_cleanup(&hfds) < 0) {
+         perror("httpfds_cleanup");
+      }
+      return -1;
    }
 
+   if (DEBUG) {
+      fprintf(stderr, "entering infinite loop...\n");
+   }
+   
    /* service new connections & requests (infinite loop) */
    while (1) {
       int nready;
 
-      if ((nready = poll(pfds->fds, pfds->count, -1)) < 0) {
-         perror("poll");
-         goto cleanup;
-      }
-      if (nready > 0) {
-         int serv_revents, client_revents;
-         // TODO: for loop
+      if (DEBUG) {
+         fprintf(stderr, "polling...\n");
       }
       
-   }
-
-   /* cleanup */
- cleanup:
-   /* close all client sockets */
-   for (struct pollfd *client_pfd = client_pfds; client_pfd < client_pfds_end; ++client_pfd) {
-      if (close(client_pfd->fd) < 0) {
-         fprintf("close(%d): %s\n", client_pfd->fd, strerror(errno));
+      if ((nready = poll(hfds.fds, hfds.count, -1)) < 0) {
+         perror("poll");
+         if (httpfds_cleanup(&hfds) < 0) {
+            perror("httpfds_cleanup");
+         }
+         return -1;
       }
-   }
-   free(client_pfds);
 
-   return -1;
+      if (DEBUG) {
+         fprintf(stderr, "poll: %d descriptors ready\n", nready);
+      }
+      
+      for (size_t i = 0; nready > 0; ++i) {
+         int fd;
+         int revents;
+         
+         fd = hfds.fds[i].fd;
+         revents = hfds.fds[i].revents;
+         if (fd >= 0 && revents) {
+            if (fd == servfd) {
+               if (revents & POLLERR) {
+                  /* server error*/
+                  fprintf(stderr, "server_loop: server socket error\n");
+                  if (httpfds_cleanup(&hfds) < 0) {
+                     perror("httpfds_cleanup");
+                  }
+                  return -1;
+               } else if (revents & POLLIN) {
+                  if (server_accept(fd, &hfds) < 0) {
+                     perror("server_accept");
+                     if (httpfds_cleanup(&hfds) < 0) {
+                        perror("httpfds_cleanup");
+                     }
+                     return -1;
+                  }
+               }
+            } else {
+               if (revents & POLLERR) {
+                  /* close client socket & mark as closed */
+                  if (httpfds_remove(i, &hfds) < 0) {
+                     perror("httpds_remove");
+                     retv = -1;
+                  }
+               } else if (revents & POLLIN) {
+                  int req_stat;
+                  httpmsg_t *reqp = &hfds.reqs[i];
+                  /* read data */
+                  req_stat = request_read(servfd, fd, reqp);
+                  switch (req_stat) {
+                  case REQ_RD_RSUCCESS: {
+                     int prs_stat;
+                     
+                     /* parse request */
+                     prs_stat = request_parse(reqp);
+                     switch (prs_stat) {
+                     case REQ_PRS_RSUCCESS: 
+                        if (server_handle_req(fd, DOCUMENT_ROOT, SERVER_NAME, reqp) < 0) {
+                           perror("server_handle_req");
+                           retv = -1;
+                        }
+                        break;
+                     case REQ_PRS_RSYNTAX:
+                        break;
+                     case REQ_PRS_RERROR:
+                     default:
+                        retv = -1;
+                        break;
+                     }
+                     if (httpfds_remove(i, &hfds) < 0) {
+                        perror("httpfds_remove");
+                        retv = -1;
+                     }
+                     break;
+                  }
+                  case REQ_RD_RAGAIN:
+                     // still need to read more data
+                     break;
+                  case REQ_RD_RERROR:
+                  default:
+                     if (httpfds_remove(i, &hfds) < 0) {
+                        perror("httpfds_remove");
+                     }
+                     retv = -1;
+                     break;
+                  }
+               }
+            }
+            
+            --nready;
+         }
+         
+      }
+
+      /* pack httpfds in case some connections were closed */
+      httpfds_pack(&hfds); // never fails
+   }
+   
+   if (httpfds_cleanup(&hfds) < 0) {
+      perror("httpfds_cleanup");
+      return -1;
+   }
+
+   return retv;
 }
 
-int server_accept(int servfd, pollfds_t *pfds) {
+int server_accept(int servfd, httpfds_t *hfds) {
    socklen_t addrlen;
    struct sockaddr_in client_sa;
    int client_fd;
@@ -127,101 +210,140 @@ int server_accept(int servfd, pollfds_t *pfds) {
       perror("accept");
       return -1;
    }
-   if (pollfds_insert(client_fd, POLLIN, pfds) < 0) {
-      perror("pollfds_insert");
+   if (httpfds_insert(client_fd, POLLIN, hfds) < 0) {
+      perror("httpfds_insert");
       return -1;
    }
 
    return 0;
 }
 
-#define POLLFDS_INIT_LEN
-int pollfds_init(pollfds_t *pfds) {
-   pfds->len = POLLFDS_INIT_LEN;
-   pfds->count = 0;
-   if ((pfds->fds = calloc(pfds->len, sizeof(struct pollfd))) < 0) {
-      return -1;
-   }
-
-   return 0;
+#define HTTPFDS_MINLEN 16
+void httpfds_init(httpfds_t *hfds) {
+   hfds->len = 0;
+   hfds->count = 0;
+   hfds->fds = NULL;
+   hfds->reqs = NULL;
 }
 
-int pollfds_resize(size_t newlen, pollfds_t *pfds) {
+int httpfds_resize(size_t newlen, httpfds_t *hfds) {
    struct pollfd *fds_tmp;
+   httpmsg_t *reqs_tmp;
 
-   if ((fds_tmp = reallocarray(pfds->fds, newlen, sizeof(struct pollfd))) == NULL) {
+   if ((fds_tmp = reallocarray(hfds->fds, newlen, sizeof(struct pollfd))) == NULL) {
       return -1;
    }
-   pfds->fds = fds_tmp;
-   pfds->len = newlen;
+   hfds->fds = fds_tmp;
+   if ((reqs_tmp = reallocarray(hfds->reqs, newlen, sizeof(httpmsg_t))) == NULL) {
+      return -1;
+   }
+   hfds->reqs = reqs_tmp;
+   hfds->len = newlen;
 
    return 0;
 }
 
 
-int pollfds_insert(int fd, int events, pollfds_t *pfds) {
-   struct pollfd *newentry;
-   
+int httpfds_insert(int fd, int events, httpfds_t *hfds) {
+   struct pollfd *fdentry;
+   httpmsg_t *reqentry;
+   size_t index;
+
    /* resize if necessary */
-   if (pfds->count == pfds->len) {
-      if (pollfds_resize(pfds->len * 2, pfds) < 0) {
+   if (hfds->count == hfds->len) {
+      size_t newlen;
+
+      newlen = smax(hfds->len * 2, HTTPFDS_MINLEN);
+      if (httpfds_resize(newlen, hfds) < 0) {
          return -1;
       }
    }
 
-   /* append fd */
-   newentry = pfds->fds + pfds->count;
-   newentry->fd = fd;
-   newentry->events = events;
+   index = hfds->count;
+   fdentry = &hfds->fds[index];
+   reqentry = &hfds->reqs[index];
 
+   /* append fd */
+   fdentry->fd = fd;
+   fdentry->events = events;
+
+   /* append http request */
+   if (message_init(reqentry) < 0) {
+      return -1;
+   }
+
+   ++hfds->count;
    return 0;
 }
 
-// no remove() function, since would disrupt iterators
+/* doesn't change ordering of entries */
+int httpfds_remove(size_t index, httpfds_t *hfds) {
+   int *fdp = &hfds->fds[index].fd;
+   httpmsg_t *reqp = &hfds->reqs[index];
+   int retv = 0;
+   
+   if (close(*fdp) < 0) {
+      fprintf(stderr, "close(%d): %s\n", *fdp, strerror(errno));
+      retv = -1;
+   }
+   *fdp = -1; // mark as deleted
+
+   message_delete(reqp);
+   return retv;
+}
+
 // removes fds < 0
-ssize_t pollfds_pack(size_t index, pollfds_t *pfds) {
-   struct pollfd *fd_front, *fd_back;
+size_t httpfds_pack(httpfds_t *hfds) {
+   //struct pollfd *fd_front, *fd_back;
+   ssize_t front, back;
    size_t newcount;
 
-   newcount = pfds->count;
-   fd_front = pfds->fds;
-   fd_back = pfds->fds + pfds->count - 1;
-   while (fd_front < fd_back && fd_back->fd < 0) {
-      --fd_back;
+   newcount = hfds->count;
+   front = 0;
+   back = hfds->count - 1;
+   while (front < back && hfds->fds[back].fd < 0) {
+      --back;
       --newcount;
    }
-   while (fd_front < fd_back) {
-      if (fd_front->fd < 0) {
-         memcpy(fd_front, fd_back, sizeof(struct pollfd));
-         --fd_back;
+   while (front < back) {
+      if (hfds->fds[front].fd < 0) {
+         memcpy(&hfds->fds[front], &hfds->fds[back], sizeof(struct pollfd));
+         memcpy(&hfds->reqs[front], &hfds->reqs[back], sizeof(httpmsg_t));
+         --back;
          --newcount;
-         while (fd_front < fd_back && fd_back->fd < 0) {
-            --fd_back;
+         while (front < back && hfds->fds[back].fd < 0) {
+            --back;
             --newcount;
          }
       }
-      ++fd_front;
+      ++front;
    }
 
-   pfds->count = newcount;
+   hfds->count = newcount;
    return newcount;
 }
 
-/* cleanup */
-int pollfds_cleanup(pollfds_t *pfds) {
+/* cleanup &  delete */
+int httpfds_cleanup(httpfds_t *hfds) {
    int retv;
 
    retv = 0;
-   for (struct pollfd *pfd = pfds->fds; pfd < pfds->fds + pfds->count; ++pfd) {
-      if (pfd->fd >= 0) {
-         if (close(pfd->fd) < 0) {
-            fprintf("close(%d): %s\n", pfd->fd, strerror(errno));
+   for (size_t i = 0; i < hfds->count; ++i) {
+      if (hfds->fds[i].fd >= 0) {
+         /* close client socket */
+         if (close(hfds->fds[i].fd) < 0) {
+            fprintf(stderr, "close(%d): %s\n", hfds->fds[i].fd, strerror(errno));
             retv = -1;
          }
+         /* delete request */
+         message_delete(&hfds->reqs[i]);
       }
    }
    
-   free(pfds->fds);
+   free(hfds->fds);
+   free(hfds->reqs);
+   hfds->fds = NULL;
+   hfds->reqs = NULL;
 
    return retv;
 }
