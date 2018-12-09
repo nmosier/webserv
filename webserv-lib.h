@@ -56,7 +56,7 @@ typedef struct {
 int server_start(const char *port, int backlog);
 int server_handle_req(int conn_fd, const char *docroot, const char *servname, httpmsg_t *req);
 int server_handle_get(int conn_fd, const char *docroot, const char *servname, httpmsg_t *req);
-httpmsg_t *message_init();
+int message_init(httpmsg_t *msg);
 int request_read(int servsock_fd, int conn_fd, httpmsg_t *req);
 int request_parse(httpmsg_t *req);
 void message_delete(httpmsg_t *req);
@@ -100,8 +100,8 @@ enum {
 };
 
 
-#define HM_OFF2STR(off, msg)  (msg->hm_text + off)
-#define HM_STR2OFF(str, msg)  (str - msg->hm_text)
+#define HM_OFF2STR(off, msg)  ((msg)->hm_text + (off))
+#define HM_STR2OFF(str, msg)  ((str) - (msg)->hm_text)
 
 #define HM_TEXTFREE(req) ((req)->hm_text_size - ((req)->hm_text_endp - (req)->hm_text))
 

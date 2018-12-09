@@ -82,14 +82,7 @@ int server_start(const char *port, int backlog) {
 // returns -1 & error EAGAIN or EWOULDBLOCK if not available
 // if *req is null, then create new. Else resume read.
 
-httpmsg_t *message_init() {
-   httpmsg_t *msg;
-   
-   /* allocate message */
-   if ((msg = malloc(sizeof(httpmsg_t))) == NULL) {
-      return NULL;
-   }
-   
+int message_init(httpmsg_t *msg) {
    /* initialize struct fields */
    memset(msg, 0, sizeof(httpmsg_t));
    msg->hm_body = -1;
@@ -98,7 +91,7 @@ httpmsg_t *message_init() {
    msg->hm_text_endp = msg->hm_text = malloc(HTTPMSG_TEXTSZ + 1); // +1 for null terminator
    if (msg->hm_text == NULL) {
       message_delete(msg);
-      return NULL;
+      return -1;
    }
    msg->hm_text_size = HTTPMSG_TEXTSZ;
    
@@ -107,11 +100,11 @@ httpmsg_t *message_init() {
                                                    sizeof(httpmsg_header_t));
    if (msg->hm_headers == NULL) {
       message_delete(msg);
-      return NULL;
+      return -1;
    }
    msg->hm_nheaders = HTTPMSG_NHEADS;
 
-   return msg;
+   return 0;
 }
 
 
@@ -245,9 +238,6 @@ void message_delete(httpmsg_t *msg) {
       /* free members */
       free(msg->hm_headers);
       free(msg->hm_text);
-      
-      /* free request */
-      free(msg);
    }
 }
 
@@ -359,7 +349,7 @@ int response_insert_body(const char *body, size_t bodylen, const char *type, htt
    
    /* resize response's text if necessary */
    if (HM_TEXTFREE(res) < bodylen) {
-      if (message_resize_text(res->hm_text_size * 2, res) < 0) {
+      if (message_resize_text(res->hm_text_size + bodylen - HM_TEXTFREE(res), res) < 0) {
          return -1;
       }
    }
@@ -449,10 +439,10 @@ int response_send(int conn_fd, httpmsg_t *res) {
       }
    }
 
-   /* format & send entire message */
+   /* format & send message header */
    res_fmt =
       HM_VERSION_PREFIX"%s %d %s"HM_ENT_TERM   // response line
-      "%s"HM_ENT_TERM                          // response headers
+      "%s"HM_ENT_TERM,                         // response headers
       "%s";                                    // response body
    line = &res->hm_line.resl;
    status = line->status;
@@ -468,6 +458,7 @@ int response_send(int conn_fd, httpmsg_t *res) {
                            version, status->code, status->phrase,       // line args
                            hdrs_str,                                    // header arg
                            body);                                       // body arg
+      
    }
 
 
@@ -488,54 +479,63 @@ int response_insert_file(const char *path, httpmsg_t *res) {
    char *last_mod;
    char *body;
    char content_type[CONTENT_TYPE_MAXLEN];
-   int saved_errno, error;
+   int retv;
 
+   /* initialize variables (checked at cleanup) */
+   fd = -1;
+   last_mod = NULL;
+   body = MAP_FAILED;
+   retv = -1; // error by default
+   
    /* open file */
    if ((fd = open(path, O_RDONLY)) < 0) {
-      return -1;
+      goto cleanup;
    }
    
    /* get file info */
    if (fstat(fd, &fd_info) < 0) {
-      close(fd);
-      return -1;
+      goto cleanup;
    }
    fd_size = fd_info.st_size;
 
    /* map file into memory */
    if ((body = mmap(NULL, fd_size, PROT_READ, MAP_PRIVATE, fd, 0)) == MAP_FAILED) {
-      close(fd);
-      return -1;
+      goto cleanup;
    }
 
-   /* insert into response as body and then unmap memory & close file
-    * (error checking is tricky here) */
-   error = 0;
+   /* insert into response as body */
    get_content_type(path, content_type);
    if (response_insert_body(body, fd_size, content_type, res) < 0) {
-      error = 1;
-      saved_errno = errno;
+      goto cleanup;
    }
-   if (munmap(body, fd_size) < 0) { error = 1; }
-   if (close(fd) < 0) { error = 1; }
-   if (error) {
-      errno = saved_errno;
-      return -1;
-   }
-
+   
    /* insert Last-Modified header */
    if (hm_fmtdate(&fd_info.st_mtim.tv_sec, &last_mod) < 0) {
-      return -1;
+      goto cleanup;
    }
    if (response_insert_header(HM_HDR_LASTMODIFIED, last_mod, res) < 0) {
-      free(last_mod);
-      return -1;
+      goto cleanup;
    }
 
-   /* cleanup */
-   free(last_mod);
+   retv = 0; // success (so far)
    
-   return 0;
+ cleanup:
+   /* cleanup */
+   if (body != MAP_FAILED) {
+      if (munmap(body, fd_size) < 0) {
+         retv = -1;
+      }
+   }
+   if (fd >= 0) {
+      if (close(fd) < 0) {
+         retv = -1;
+      }
+   }
+   if (last_mod) {
+      free(last_mod);
+   }
+   
+   return retv;
 }
 
 // genhdrs = general headers
@@ -598,30 +598,32 @@ int server_handle_req(int conn_fd, const char *docroot, const char *servname, ht
 // handle GET request
 // TODO: make case statement table-driven, not switch case
 int server_handle_get(int conn_fd, const char *docroot, const char *servname, httpmsg_t *req) {
-   httpmsg_t *res;
+   httpmsg_t res;
    char *path;
    int code;
 
    /* create response */
-   if ((res = message_init()) == NULL) {
+   if (message_init(&res) < 0) {
       return -1;
    }
    
    /* get response code & full path */
    if ((code = document_find(docroot, &path, req)) < 0) {
-      message_delete(res);
+      message_delete(&res);
       return -1;
    }
       
    /* insert file */
    if (code == C_OK) {
-      if (response_insert_file(path, res) < 0) {
-         message_delete(res);
+      if (response_insert_file(path, &res) < 0) {
+         message_delete(&res);
          free(path);
          return -1;
       }
+      free(path);
    } else {
       const char *body;
+      free(path);
       switch (code) {
       case C_NOTFOUND:
          body = C_NOTFOUND_BODY;
@@ -630,43 +632,43 @@ int server_handle_get(int conn_fd, const char *docroot, const char *servname, ht
          body = C_FORBIDDEN_BODY;
          break;
       default:
-         message_delete(res);
+         message_delete(&res);
          errno = EBADRQC;
          return -1;
       }
-      if (response_insert_body(body, strlen(body)+1, CONTENT_TYPE_PLAIN, res) < 0) {
-         message_delete(res);
+      if (response_insert_body(body, strlen(body)+1, CONTENT_TYPE_PLAIN, &res) < 0) {
+         message_delete(&res);
          return -1;
       }
    }
 
    /* insert general headers */
-   if (response_insert_genhdrs(res) < 0) {
-      message_delete(res);
+   if (response_insert_genhdrs(&res) < 0) {
+      message_delete(&res);
       return -1;
    }
 
    /* insert server headers */
-   if (response_insert_servhdrs(servname, res) < 0) {
-      message_delete(res);
+   if (response_insert_servhdrs(servname, &res) < 0) {
+      message_delete(&res);
       return -1;
    }
    
    /* set response line */
-   if (response_insert_line(code, HM_RES_VERSION, res) < 0) {
-      message_delete(res);
+   if (response_insert_line(code, HM_RES_VERSION, &res) < 0) {
+      message_delete(&res);
       return -1;
    }
    
    /* send request */
-   if (response_send(conn_fd, res) < 0) {
-      message_delete(res);
+   if (response_send(conn_fd, &res) < 0) {
+      message_delete(&res);
       return -1;
    }
 
    /* cleanup */
-   message_delete(res);
-   free(path);
+   message_delete(&res);
+   //free(path);
    return 0;
 }
 
