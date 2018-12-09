@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
 #include <errno.h>
 #include <sys/socket.h>
@@ -12,6 +13,7 @@
 #include "webserv-multi.h"
 
 #define DOCUMENT_ROOT "/home/nmosier"
+#define SERVER_NAME "webserv-multi/1.0"
 
 int main(int argc, char *argv[]) {
    /* test server_start() */
@@ -27,11 +29,27 @@ int main(int argc, char *argv[]) {
    struct sockaddr_in client_sa;
    socklen_t addrlen;
    int client_fd;
+
+
+   /* try polling! */
+   struct pollfd servpfd;
+   servpfd.fd = server_fd;
+   servpfd.events = POLLIN;
+   int pollval = poll(&servpfd, 1, -1);
+   if (pollval < 0) {
+      perror("poll");
+      exit(10);
+   }
+   if (pollval > 0) {
+      fprintf(stderr, "poll: events = %d\n", servpfd.revents);
+   }
+   fprintf(stderr, "here\n");
    
    do {
       addrlen = sizeof(client_sa);
       client_fd = accept(server_fd, (struct sockaddr *) &client_sa, &addrlen);
    } while (client_fd < 0 && (errno == EAGAIN || errno == EWOULDBLOCK));
+
    
    printf("client_fd=%d\n", client_fd);
 
@@ -78,20 +96,10 @@ int main(int argc, char *argv[]) {
       exit(4);
    }
 
-   /* 
-   if (response_insert_file("READMESS", res) < 0) {
-      perror("response_insert_file");
-      exit(5);
-      } */
-   if (server_handle_get(client_fd, DOCUMENT_ROOT, req) < 0) {
+   if (server_handle_req(client_fd, DOCUMENT_ROOT, SERVER_NAME, req) < 0) {
       perror("server_handle_get");
       exit(7);
    }
-
-   //   if (response_send(client_fd, res) < 0) {
-   //      perror("response_send");
-   //      exit(6);
-   //   }
 
    message_delete(req);
    message_delete(res);

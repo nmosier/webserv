@@ -15,7 +15,7 @@
 #include "webserv-lib.h"
 #include "webserv-util.h"
 
-#define DEBUG 0
+#define DEBUG 1
 
 // prints errors
 int server_start(const char *port, int backlog) {
@@ -585,10 +585,10 @@ int response_insert_servhdrs(const char *servname, httpmsg_t *res) {
    return 0;
 }
 
-int server_handle_req(int conn_fd, const char *docroot, httpmsg_t *req) {
+int server_handle_req(int conn_fd, const char *docroot, const char *servname, httpmsg_t *req) {
    switch (req->hm_line.reql.method) {
    case M_GET:
-      return server_handle_get(conn_fd, docroot, req);
+      return server_handle_get(conn_fd, docroot, servname, req);
    default:
       errno = EBADRQC;
       return -1;
@@ -597,7 +597,7 @@ int server_handle_req(int conn_fd, const char *docroot, httpmsg_t *req) {
 
 // handle GET request
 // TODO: make case statement table-driven, not switch case
-int server_handle_get(int conn_fd, const char *docroot, httpmsg_t *req) {
+int server_handle_get(int conn_fd, const char *docroot, const char *servname, httpmsg_t *req) {
    httpmsg_t *res;
    char *path;
    int code;
@@ -642,6 +642,12 @@ int server_handle_get(int conn_fd, const char *docroot, httpmsg_t *req) {
 
    /* insert general headers */
    if (response_insert_genhdrs(res) < 0) {
+      message_delete(res);
+      return -1;
+   }
+
+   /* insert server headers */
+   if (response_insert_servhdrs(servname, res) < 0) {
       message_delete(res);
       return -1;
    }
