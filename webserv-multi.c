@@ -10,12 +10,109 @@
 #include <sys/types.h>
 #include <netinet/in.h>
 #include "webserv-lib.h"
+#include "webserv-dbg.h"
+#include "webserv-main.h"
 #include "webserv-multi.h"
 
-#define DOCUMENT_ROOT "/home/nmosier"
-#define SERVER_NAME "webserv-multi/1.0"
+int server_loop(int servfd) {
+   int retv;
 
-int main(int argc, char *argv[]) {
+   /* initialize variables */
+   retv = 0;
+
+   /* accept new connections & spin off new threads */
+   while (1) {
+      int client_fd;
+      pthread_t thd;
+      struct client_thread_args thd_args;
+
+      /* accept new connection */
+      if ((client_fd = server_accept(servfd)) < 0) {
+         perror("server_accept");
+         retv = -1;
+         goto cleanup;
+      }
+
+      /* spin off new thread */
+      thd_args.client_fd = client_fd;
+      if (pthread_create(&thd, NULL, client_loop, &thd_args)) {
+         /* don't exit -- wait for other threads to die */
+         perror("pthread_create");
+         retv = -1;
+      }
+   }
+      
+ cleanup:
+   if (close(servfd) < 0) {
+      perror("close");
+      retv = -1;
+   }
+   
+   return retv;
+}
+
+
+void *client_loop(void *args) {
+   struct client_thread_args *thd_args;
+   int client_fd;
+   httpmsg_t req;
+   int req_stat, prs_stat;
+   int64_t retv; // sizeof(long long) == sizeof(void *)
+
+   /* initialize variables */
+   thd_args = (struct client_thread_args *) args;
+   client_fd = thd_args->client_fd;
+   retv = -1; // 0 is success
+   if (message_init(&req) < 0) {
+      perror("message_init");
+      return (void *) -1;
+   }
+
+   /* read request */
+   if (message_init(&req) < 0) {
+      perror("message_init");
+      goto cleanup;
+   }
+   do {
+      req_stat = request_read(client_fd, &req);
+   } while (req_stat == REQ_RD_RAGAIN);
+   if (req_stat == REQ_RD_RERROR) {
+      perror("request_read");
+      goto cleanup;
+   }
+
+   /* parse request */
+   prs_stat = request_parse(&req);
+   if (prs_stat != REQ_PRS_RSUCCESS) {
+      /* print error if internal error */
+      if (prs_stat == REQ_PRS_RERROR) {
+         perror("request_parse");
+      }
+      goto cleanup;
+   }
+
+   /* handle request */
+   if (server_handle_req(client_fd, DOCUMENT_ROOT, SERVER_NAME, &req) < 0) {
+      perror("server_handle_get");
+      goto cleanup;
+   }
+
+   retv = 0;
+   
+ cleanup:
+   if (close(client_fd) < 0) {
+      perror("close");
+      retv = -1;
+   }
+   message_delete(&req);
+
+   return (void *) retv;
+}
+      
+
+
+
+int main_(int argc, char *argv[]) {
    /* test server_start() */
    int server_fd;
    if ((server_fd = server_start(argv[1], BACKLOG)) < 0) {
@@ -62,7 +159,7 @@ int main(int argc, char *argv[]) {
    
    int req_stat;
    do {
-      req_stat = request_read(server_fd, client_fd, &req);
+      req_stat = request_read(client_fd, &req);
    } while (req_stat == REQ_RD_RAGAIN);
 
    printf("request_read status: %d\n", req_stat);
