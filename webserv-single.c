@@ -36,7 +36,7 @@ int server_loop(int servfd) {
    }
 
    /* service new connections & requests (infinite loop) */
-   while (1) {
+   while (retv >= 0) {
       int nready;
 
       if (DEBUG) {
@@ -95,47 +95,44 @@ int server_loop(int servfd) {
                      retv = -1;
                   }
                } else if (revents & POLLIN) {
-                  int req_stat;
-                  httpmsg_t *reqp = &hfds.reqs[i];
+                  int rm_fd;
+                  httpmsg_t *reqp;
+
+                  /* initialize variables */
+                  reqp = &hfds.reqs[i];
+                  rm_fd = 0; // don't remove fd by default
+                  
                   /* read data */
-                  req_stat = request_read(fd, reqp);
-                  switch (req_stat) {
-                  case REQ_RD_RSUCCESS: {
-                     int prs_stat;
-                     
-                     /* parse request */
-                     prs_stat = request_parse(reqp);
-                     switch (prs_stat) {
-                     case REQ_PRS_RSUCCESS: 
+                  if (request_read(fd, reqp) < 0) {
+                     /* incomplete read */
+                     if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                        /* fatal error (unrelated to blocking) */
+                        perror("request_read");
+                        rm_fd = 1;
+                        retv = -1;
+                     }
+                  } else {
+                     /* parse complete request */
+                     if (request_parse(reqp) < 0) {
+                        perror("request_parse");
+                        rm_fd = 1;
+                        if (errno != EBADMSG) {
+                           retv = -1; // internal error
+                        }
+                     } else {
                         if (server_handle_req(fd, DOCUMENT_ROOT, SERVER_NAME, reqp) < 0) {
                            perror("server_handle_req");
                            retv = -1;
                         }
-                        break;
-                     case REQ_PRS_RSYNTAX:
-                        break;
-                     case REQ_PRS_RERROR:
-                     default:
-                        retv = -1;
-                        break;
+                        rm_fd = 1; // done receiving data
                      }
-                     if (httpfds_remove(i, &hfds) < 0) {
-                        perror("httpfds_remove");
-                        retv = -1;
-                     }
-                     break;
                   }
-                  case REQ_RD_RAGAIN:
-                     // still need to read more data
-                     break;
-                  case REQ_RD_RERROR:
-                  default:
-                     if (httpfds_remove(i, &hfds) < 0) {
-                        perror("httpfds_remove");
-                     }
+                  
+                  if (rm_fd && httpfds_remove(i, &hfds) < 0) {
+                     perror("httpfds_remove");
                      retv = -1;
-                     break;
                   }
+
                }
             }
             
@@ -150,7 +147,7 @@ int server_loop(int servfd) {
    
    if (httpfds_cleanup(&hfds) < 0) {
       perror("httpfds_cleanup");
-      return -1;
+      retv = -1;
    }
 
    return retv;
