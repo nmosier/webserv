@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <sys/utsname.h>
 #include "webserv-util.h"
-
+#include "webserv-dbg.h"
 
 
 

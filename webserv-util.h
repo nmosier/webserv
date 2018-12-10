@@ -9,7 +9,7 @@
 
 #define smprintf(sptr, fmt, ...) ((*sptr = malloc(snprintf(NULL, 0, fmt, __VA_ARGS__) + 1)) ? \
                                   ((sprintf(*sptr, fmt, __VA_ARGS__) < 0) ? \
-                                      (free(*sptr), -1) : 0) :          \
+                                   (free(*sptr), -1) : 0) :             \
                                   -1)
 
 char *strstrip(char *str, char *strip);
