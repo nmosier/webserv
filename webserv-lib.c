@@ -14,8 +14,8 @@
 #include <sys/utsname.h>
 #include "webserv-lib.h"
 #include "webserv-util.h"
+#include "webserv-dbg.h"
 
-#define DEBUG 1
 
 // prints errors
 int server_start(const char *port, int backlog) {
@@ -29,8 +29,8 @@ int server_start(const char *port, int backlog) {
    res = NULL;
    error = 0; // error=1 if error occurred
    
-   /* obtain (nonblocking) socket */
-   if ((servsock_fd = socket(AF_INET, SOCK_STREAM|SOCK_NONBLOCK, 0)) < 0) {
+   /* obtain socket */
+   if ((servsock_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
       perror("socket");
       error = 1;
       goto cleanup;
@@ -77,6 +77,24 @@ int server_start(const char *port, int backlog) {
    return error ? -1 : servsock_fd;
 }
 
+
+
+int server_accept(int servfd) {
+   socklen_t addrlen;
+   struct sockaddr_in client_sa;
+   int client_fd;
+
+   /* accept socket */
+   addrlen = sizeof(client_sa);
+   client_fd = accept(servfd, (struct sockaddr *) &client_sa, &addrlen);
+
+   return client_fd;
+}
+
+
+
+
+
 // EXPLAIN DESIGN DECISION
 // nonblocking -- so super-slow connections don't gum up the works
 // returns -1 & error EAGAIN or EWOULDBLOCK if not available
@@ -108,7 +126,7 @@ int message_init(httpmsg_t *msg) {
 }
 
 
-int request_read(int servsock_fd, int conn_fd, httpmsg_t *req) {
+int request_read(int conn_fd, httpmsg_t *req) {
    int msg_done;
    ssize_t bytes_received;
    size_t bytes_free;
@@ -623,7 +641,6 @@ int server_handle_get(int conn_fd, const char *docroot, const char *servname, ht
       free(path);
    } else {
       const char *body;
-      free(path);
       switch (code) {
       case C_NOTFOUND:
          body = C_NOTFOUND_BODY;
