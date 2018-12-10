@@ -127,58 +127,46 @@ int message_init(httpmsg_t *msg) {
 
 
 int request_read(int conn_fd, httpmsg_t *req) {
-   int msg_done;
    ssize_t bytes_received;
    size_t bytes_free;
 
    /* read until block, EOF, or \r\n */
-   msg_done = 0; // whether terminating \r\n has been encountered
-   do {
-      /* resize text buffer if necessary */
-      bytes_free = HM_TEXTFREE(req);
-      if (bytes_free == 0) {
-         if (message_resize_text(req->hm_text_size * 2, req) < 0) {
-            perror("request_resize_text");
-            return REQ_RD_RERROR;
-         }
-         bytes_free = HM_TEXTFREE(req); // update free byte count
-      }
 
-      /* receive bytes */
-      bytes_received = recv(conn_fd, req->hm_text_endp, bytes_free, MSG_DONTWAIT);
-
-      /* if bytes received, update request fields */
-      if (bytes_received > 0) {
-         /* update text buffer fields */
-         req->hm_text_endp += bytes_received;
-         *(req->hm_text_endp) = '\0';
-         
-         /* check for terminating line */
-         if (req->hm_text_endp - req->hm_text >= 4 &&
-             strcmp("\r\n\r\n", req->hm_text_endp - 4) == 0) {
-            msg_done = 1;
-         }
+   /* resize text buffer if necessary */
+   bytes_free = HM_TEXTFREE(req);
+   if (bytes_free == 0) {
+      if (message_resize_text(req->hm_text_size * 2, req) < 0) {
+         perror("request_resize_text");
+         return -1;
       }
-   } while (bytes_received > 0 && !msg_done);
-
-   /* check for errors */
-   if (bytes_received < 0) {
-      /* check if due to blocking */
-      if (errno == EWOULDBLOCK || errno == EAGAIN) {
-         return REQ_RD_RAGAIN;
-      }
-      /* otherwise, report error */
-      perror("recv");
-      return REQ_RD_RERROR;
+      bytes_free = HM_TEXTFREE(req); // update free byte count
    }
    
-   return REQ_RD_RSUCCESS;
+   /* receive bytes */
+   bytes_received = recv(conn_fd, req->hm_text_endp, bytes_free, MSG_DONTWAIT);
+   if (bytes_received < 0) {
+      if (errno != EAGAIN && errno != EWOULDBLOCK) {
+         perror("recv");
+      }
+      return -1;
+   }
+
+   /* update text buffer fields */
+   req->hm_text_endp += bytes_received;
+   *(req->hm_text_endp) = '\0';
+   
+   /* check for terminating line */
+   if (req->hm_text_endp - req->hm_text < 4 || strcmp("\r\n\r\n", req->hm_text_endp - 4)) {
+      errno = EAGAIN; // more to come
+      return -1;
+   }
+
+   return 0; // success; request fully received
 }
 
-
-
-
-
+/* ERRORS:
+ *  - EBADMSG: request syntax error (not a valid request)
+ */
 int request_parse(httpmsg_t *req) {
    char *saveptr_text;
 
@@ -191,13 +179,15 @@ int request_parse(httpmsg_t *req) {
       req->hm_line.reql.method = hr_str2meth(req_method_str);
    }
    if (req_method_str == NULL || req->hm_line.reql.method < 0) {
-      return REQ_PRS_RSYNTAX;
+      errno = EBADMSG;
+      return -1;
    }
 
    /* parse request line URI */
    req_uri_str = strtok(NULL, " ");
    if (req_uri_str == NULL) {
-      return REQ_PRS_RSYNTAX;
+      errno = EBADMSG;
+      return -1;
    }
    req->hm_line.reql.uri = HM_STR2OFF(req_uri_str, req);
 
@@ -205,7 +195,8 @@ int request_parse(httpmsg_t *req) {
    req_version_str = strtok(NULL, "\r"); // last item in line
    req_version_str = strskip(HM_VERSION_PREFIX, req_version_str);
    if (req_version_str == NULL) {
-      return REQ_PRS_RSYNTAX;
+      errno = EBADMSG;
+      return -1;
    }
    req->hm_line.reql.version = HM_STR2OFF(req_version_str, req);
    
@@ -224,7 +215,7 @@ int request_parse(httpmsg_t *req) {
 
          /* expand header size */
          if (message_resize_headers(new_nheaders, req) < 0) {
-            return REQ_PRS_RERROR;
+            return -1;
          }
 
          header_it = req->hm_headers + header_i; // update header iterator         
@@ -234,11 +225,13 @@ int request_parse(httpmsg_t *req) {
 
       /* get key */
       if ((key_str = strtok(header_str, ":")) == NULL) {
-         return REQ_PRS_RSYNTAX;
+         errno = EBADMSG;
+         return -1;
       }
       /* get value */
       if ((val_str = strtok(NULL, "\r")) == NULL) {
-         return REQ_PRS_RSYNTAX;
+         errno = EBADMSG;
+         return -1;
       } else {
          /* strip leading whitespace */
          val_str = strstrip(val_str, " ");
@@ -248,7 +241,7 @@ int request_parse(httpmsg_t *req) {
       header_it->value = HM_STR2OFF(val_str, req);
    }
    
-   return REQ_PRS_RSUCCESS;
+   return 0;
 }
 
 void message_delete(httpmsg_t *msg) {

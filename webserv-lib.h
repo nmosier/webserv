@@ -84,22 +84,8 @@ enum {
    DOC_FIND_ENOTFOUND
 };
 
-
-enum {
-   REQ_RD_RSUCCESS,
-   REQ_RD_RERROR,
-   REQ_RD_RAGAIN
-};
-
 #define HTTPMSG_TEXTSZ (0x1000-1)
 #define HTTPMSG_NHEADS 10
-
-enum {
-   REQ_PRS_RSUCCESS,
-   REQ_PRS_RSYNTAX,
-   REQ_PRS_RERROR
-};
-
 
 #define HM_OFF2STR(off, msg)  ((msg)->hm_text + (off))
 #define HM_STR2OFF(str, msg)  ((str) - (msg)->hm_text)
