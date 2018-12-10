@@ -7,7 +7,7 @@
 #include "webserv-lib.h"
 #include "webserv-util.h"
 #include "webserv-fds.h"
-
+#include "webserv-dbg.h"
 
 void httpfds_init(httpfds_t *hfds) {
    hfds->len = 0;
