@@ -64,7 +64,7 @@ int server_loop(int servfd) {
          if (fd >= 0 && revents) {
             if (fd == servfd) {
                if (revents & POLLERR) {
-                  /* server error*/
+                  /* server error */
                   fprintf(stderr, "server_loop: server socket error\n");
                   if (httpfds_cleanup(&hfds) < 0) {
                      perror("httpfds_cleanup");
@@ -151,4 +151,9 @@ int server_loop(int servfd) {
    }
 
    return retv;
+}
+
+
+int server_handle_event(size_t fd_index, httpfds_t *hfds) {
+
 }
