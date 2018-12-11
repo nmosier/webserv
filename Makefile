@@ -17,11 +17,11 @@ webserv-multi: $(OBJS_MULTI) libwebserv.so
 webserv-single: $(OBJS_SINGLE) libwebserv.so
 	gcc -o $@ $(OBJS_SINGLE) $(LIBFLAGS) -pthread
 
-webserv-multi.o: webserv-multi.c webserv-multi.h
+webserv-multi.o: webserv-multi.c
 	gcc $(OFLAGS) -o $@ webserv-multi.c
 
-%.o: %.c %.h
-	gcc $(OFLAGS) -o $@ $*.c
+%.o: %.c
+	gcc $(OFLAGS) -o $@ $^
 
 .PHONY: clean
 clean:
