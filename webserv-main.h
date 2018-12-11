@@ -7,5 +7,7 @@
 #define PORT "1024"
 #define BACKLOG 10
 
+/* prototypes */
+int server_loop(int servfd);
 
 #endif
