@@ -58,9 +58,7 @@ int httpfds_insert(int fd, int events, httpfds_t *hfds) {
    fdentry->events = events;
 
    /* append http request */
-   if (message_init(reqentry) < 0) {
-      return -1;
-   }
+   message_init(reqentry);
 
    ++hfds->count;
    return 0;
@@ -78,7 +76,7 @@ int httpfds_remove(size_t index, httpfds_t *hfds) {
    }
    *fdp = -1; // mark as deleted
 
-   message_delete(reqp);
+   request_delete(reqp);
    return retv;
 }
 
@@ -126,7 +124,7 @@ int httpfds_cleanup(httpfds_t *hfds) {
             retv = -1;
          }
          /* delete request */
-         message_delete(&hfds->reqs[i]);
+         request_delete(&hfds->reqs[i]);
       }
    }
    

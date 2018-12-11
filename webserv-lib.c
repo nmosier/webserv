@@ -91,55 +91,41 @@ int server_accept(int servfd) {
    return client_fd;
 }
 
+
+size_t message_bodyfree(const httpmsg_t *msg) {
+   return msg->hm_body_size - (msg->hm_body_ptr - msg->hm_body);
+}
+
 // EXPLAIN DESIGN DECISION
 // nonblocking -- so super-slow connections don't gum up the works
 // returns -1 & error EAGAIN or EWOULDBLOCK if not available
 // if *req is null, then create new. Else resume read.
 
-int message_init(httpmsg_t *msg) {
+void message_init(httpmsg_t *msg) {
    /* initialize struct fields */
    memset(msg, 0, sizeof(httpmsg_t));
-   msg->hm_body = -1;
-
-   /* allocate & initialize buffer */
-   msg->hm_text_endp = msg->hm_text = malloc(HTTPMSG_TEXTSZ + 1); // +1 for null terminator
-   if (msg->hm_text == NULL) {
-      message_delete(msg);
-      return -1;
-   }
-   msg->hm_text_size = HTTPMSG_TEXTSZ;
-   
-   /* allocate & initialize headers */
-   msg->hm_headers = msg->hm_headers_endp = calloc(HTTPMSG_NHEADS,
-                                                   sizeof(httpmsg_header_t));
-   if (msg->hm_headers == NULL) {
-      message_delete(msg);
-      return -1;
-   }
-   msg->hm_nheaders = HTTPMSG_NHEADS;
-
-   return 0;
 }
 
 
 int request_read(int conn_fd, httpmsg_t *req) {
    ssize_t bytes_received;
-   size_t bytes_free;
+   size_t bytes_free, newsize;
 
    /* read until block, EOF, or \r\n */
 
    /* resize text buffer if necessary */
-   bytes_free = HM_TEXTFREE(req);
+   bytes_free = message_bodyfree(req);
    if (bytes_free == 0) {
-      if (message_resize_text(req->hm_text_size * 2, req) < 0) {
-         perror("request_resize_text");
+      newsize = smax(HM_BODY_INIT, req->hm_body_size * 2);
+      if (message_resize_body(newsize, req) < 0) {
+         perror("message_resize_body");
          return -1;
       }
-      bytes_free = HM_TEXTFREE(req); // update free byte count
+      bytes_free = message_bodyfree(req);
    }
    
    /* receive bytes */
-   bytes_received = recv(conn_fd, req->hm_text_endp, bytes_free, MSG_DONTWAIT);
+   bytes_received = recv(conn_fd, req->hm_body_ptr, bytes_free, MSG_DONTWAIT);
    if (bytes_received < 0) {
       if (errno != EAGAIN && errno != EWOULDBLOCK) {
          perror("recv");
@@ -148,11 +134,10 @@ int request_read(int conn_fd, httpmsg_t *req) {
    }
 
    /* update text buffer fields */
-   req->hm_text_endp += bytes_received;
-   *(req->hm_text_endp) = '\0';
+   req->hm_body_ptr += bytes_received;
    
    /* check for terminating line */
-   if (req->hm_text_endp - req->hm_text < 4 || strcmp("\r\n\r\n", req->hm_text_endp - 4)) {
+   if (req->hm_body_ptr - req->hm_body < 4 || memcmp("\r\n\r\n", req->hm_body_ptr - 4, 4)) {
       errno = EAGAIN; // more to come
       return -1;
    }
@@ -164,11 +149,11 @@ int request_read(int conn_fd, httpmsg_t *req) {
  *  - EBADMSG: request syntax error (not a valid request)
  */
 int request_parse(httpmsg_t *req) {
-   char *saveptr_text;
+   char *saveptr_body;
 
    ////////// PARSE REQUEST LINE /////////
    char *req_line, *req_method_str, *req_version_str, *req_uri_str;
-   req_line = strtok_r(req->hm_text, "\n", &saveptr_text); // has trailing '\r'
+   req_line = strtok_r(req->hm_body, "\n", &saveptr_body); // has trailing '\r'
 
    /* parse request line method */
    if ((req_method_str = strtok(req_line, " "))) {
@@ -185,7 +170,10 @@ int request_parse(httpmsg_t *req) {
       errno = EBADMSG;
       return -1;
    }
-   req->hm_line.reql.uri = HM_STR2OFF(req_uri_str, req);
+   if ((req->hm_line.reql.uri = strdup(req_uri_str)) == NULL) {
+      return -1;
+   }
+      
 
    /* parse request line HTTP version */
    req_version_str = strtok(NULL, "\r"); // last item in line
@@ -194,20 +182,22 @@ int request_parse(httpmsg_t *req) {
       errno = EBADMSG;
       return -1;
    }
-   req->hm_line.reql.version = HM_STR2OFF(req_version_str, req);
+   if ((req->hm_line.reql.version = strdup(req_version_str)) == NULL) {
+      return -1;
+   }
    
    ///////// PARSE REQUEST HEADERS /////////
    httpmsg_header_t *header_it;
    char *header_str, *val_str, *key_str;
    for (header_it = req->hm_headers;
-        (header_str = strtok_r(NULL, "\n", &saveptr_text))
+        (header_str = strtok_r(NULL, "\n", &saveptr_body))
            && strcmp(header_str, "\r");
         ++header_it) {
 
       /* check if array full */
       if (header_it == req->hm_headers + req->hm_nheaders) {
          size_t header_i = header_it - req->hm_headers; // current index
-         size_t new_nheaders = req->hm_nheaders * 2;
+         size_t new_nheaders = smax(HM_NHEADERS_INIT, req->hm_nheaders * 2);
 
          /* expand header size */
          if (message_resize_headers(new_nheaders, req) < 0) {
@@ -233,24 +223,65 @@ int request_parse(httpmsg_t *req) {
          val_str = strstrip(val_str, " ");
       }
       /* set key & value */
-      header_it->key = HM_STR2OFF(key_str, req);
-      header_it->value = HM_STR2OFF(val_str, req);
+      if ((header_it->key = strdup(key_str)) == NULL) {
+         return -1;
+      }
+      if ((header_it->value = strdup(val_str)) == NULL) {
+         return -1;
+      }
    }
+
+   req->hm_headers_endp = header_it;
    
    return 0;
 }
 
 void message_delete(httpmsg_t *msg) {
    if (msg) {
-      /* free members */
+      /* free header members */
+      if (msg->hm_headers) {
+         for (httpmsg_header_t *hdr_it = msg->hm_headers;
+              hdr_it < msg->hm_headers_endp; ++hdr_it) {
+            free(hdr_it->key);
+            free(hdr_it->value);
+         }
+      }
+      
+      /* free headers array */
       free(msg->hm_headers);
-      free(msg->hm_text);
+
+      /* free body */
+      free(msg->hm_body);
+   }
+}
+
+void request_delete(httpmsg_t *req) {
+   /* delete message members */
+   message_delete(req);
+
+   /* delete request members */
+   if (req) {
+      free(req->hm_line.reql.uri);
+      free(req->hm_line.reql.version);
+   }
+}
+
+void response_delete(httpmsg_t *res) {
+   message_delete(res);
+
+   /* delete response members */
+   if (res) {
+      free(res->hm_line.resl.version);
    }
 }
 
 int message_resize_headers(size_t new_nheaders, httpmsg_t *msg) {
    httpmsg_header_t *newheaders;
+   size_t endp_index;
 
+   /* calculate index of end pointer */
+   endp_index = msg->hm_headers_endp - msg->hm_headers;
+   
    /* reallocate headers array */
    newheaders = realloc(msg->hm_headers, (new_nheaders+1) * sizeof(httpmsg_header_t));
    if (newheaders == NULL) {
@@ -267,21 +298,22 @@ int message_resize_headers(size_t new_nheaders, httpmsg_t *msg) {
       memset(newheaders + new_nheaders, 0, sizeof(httpmsg_header_t));
    }
    msg->hm_nheaders = new_nheaders;
-
+   msg->hm_headers_endp = newheaders + endp_index;
+   
    return 0;
 }
 
-int message_resize_text(size_t newsize, httpmsg_t *msg) {
-   char *newtext;
+int message_resize_body(size_t newsize, httpmsg_t *msg) {
+   char *newbody;
 
    /* reallocate text buffer */
-   newtext = realloc(msg->hm_text, newsize + 1);
-   if (newtext == NULL) {
+   newbody = realloc(msg->hm_body, newsize);
+   if (newbody == NULL) {
       return -1;
    }
-   msg->hm_text_size = newsize;
-   msg->hm_text_endp += newtext - msg->hm_text;
-   msg->hm_text = newtext;
+   msg->hm_body_size = newsize;
+   msg->hm_body_ptr += newbody - msg->hm_body;
+   msg->hm_body = newbody;
 
    return 0;
 }
@@ -308,87 +340,68 @@ httpres_stat_t *response_find_status(int code) {
 /// response stuff
 int response_insert_header(const char *key, const char *val, httpmsg_t *res) {
    httpmsg_header_t *hdr;
-   size_t key_len, val_len;
-   char *text_ptr;
+   size_t new_nheaders;
 
-   /* resize if full */
-   if (res->hm_headers_endp == res->hm_headers + res->hm_nheaders) {
-      if (message_resize_headers(res->hm_nheaders * 2, res) < 0) {
+   /* resize headers array if full */
+   if (res->hm_headers == NULL || res->hm_headers_endp >= res->hm_headers + res->hm_nheaders) {
+      new_nheaders = smax(HM_NHEADERS_INIT, res->hm_nheaders * 2);
+      if (message_resize_headers(new_nheaders, res) < 0) {
          perror("message_resize_headers");
          return -1;
       }
    }
-   
-   hdr = res->hm_headers_endp;
-   
-   /* find length of header's underlying strings */
-   key_len = strlen(key) + 1;
-   val_len = strlen(val) + 1;
 
-   /* make sure there's enough space to copy strings into response */
-   if (HM_TEXTFREE(res) < key_len + val_len) {
-      if (message_resize_text(res->hm_text_size * 2, res) < 0) {
-         perror("message_resize_text");
-         return -1;
-      }
+   /* find & update next free header */
+   hdr = res->hm_headers_endp++;
+   
+   /* dup strings & insert into header */
+   if ((hdr->key = strdup(key)) == NULL) {
+      perror("strdup");
+      return -1;
    }
-   text_ptr = res->hm_text_endp + 1; // +1 so previous strings are terminated by '\0'
-
-   /* copy header key string & pointer */
-   memcpy(text_ptr, key, key_len); // +1 for null terminator
-   hdr->key = HM_STR2OFF(text_ptr, res);
-
-   text_ptr += key_len;
-   
-   /* copy header into array */
-   memcpy(text_ptr, val, val_len);
-   hdr->value = HM_STR2OFF(text_ptr, res);
-
-   res->hm_text_endp += key_len + val_len;
-   ++res->hm_headers_endp;
-   
+   if ((hdr->value = strdup(val)) == NULL) {
+      perror("strdup");
+      return -1;
+   }
+  
    return 0;
 }
 
-// now inserts content-type header too
+
 int response_insert_body(const char *body, size_t bodylen, const char *type, httpmsg_t *res) {
-   char bodylen_str[INTLEN(size_t) + 1];
-   
-   /* resize response's text if necessary */
-   if (HM_TEXTFREE(res) < bodylen) {
-      if (message_resize_text(res->hm_text_size + (bodylen + 1) - HM_TEXTFREE(res), res) < 0) {
-         return -1;
-      }
+   char *bodylen_str;
+
+   /* resize response's text */
+   if (message_resize_body(bodylen, res) < 0) {
+      return -1;
    }
    
-   /* copy body into response's text */
-   memcpy(res->hm_text_endp + 1, body, bodylen + 1); // +1 for null term.
+   /* copy body into response */
+   memcpy(res->hm_body, body, bodylen);
 
-   /* update response pointers */
-   res->hm_body = HM_STR2OFF(res->hm_text_endp + 1, res);
-   res->hm_text_endp += bodylen + 1;
+   /* reset the body rd/wr pointer for good measure */
+   res->hm_body_ptr = res->hm_body;
 
    /* add Content-Type header */
    if (response_insert_header(HM_HDR_CONTENTTYPE, type, res) < 0) {
       return -1;
    }
 
-
    /* add Content-Length header */
-   if (sprintf(bodylen_str, "%zu", bodylen) < 0) {
+   if (smprintf(&bodylen_str, "%zu", bodylen) < 0) {
       return -1;
    }
    if (response_insert_header(HM_HDR_CONTENTLEN, bodylen_str, res) < 0) {
+      free(bodylen_str);
       return -1;
    }
-   
+
+   free(bodylen_str);
    return 0;
 }
 
 int response_insert_line(int code, const char *version, httpmsg_t *res) {
    httpres_stat_t *status;
-   size_t version_len;
-   char *version_str;
    
    /* match code to response status */
    if ((status = response_find_status(code)) == NULL) {
@@ -397,86 +410,97 @@ int response_insert_line(int code, const char *version, httpmsg_t *res) {
    }
    res->hm_line.resl.status = status;
 
-   /* copy version into response text */
-   version_len = strlen(version) + 1;
-   if (HM_TEXTFREE(res) < version_len) {
-      if (message_resize_text(res->hm_text_size * 2, res) < 0) {
-         return -1;
-      }
+   /* copy version into response */
+   if ((res->hm_line.resl.version = strdup(version)) == NULL) {
+      return -1;
    }
-   version_str = strcpy(res->hm_text_endp + 1, version);
-   res->hm_text_endp += version_len;
-   res->hm_line.resl.version = HM_STR2OFF(version_str, res);
    
    return 0;
 }
 
-// generate & send response
-// use dprintf!
-// know that text size is enough to fit all headers
-
 int response_send(int conn_fd, httpmsg_t *res) {
    const char *res_fmt;
-   char *hdrs_str, *hdrs_str_it, *hdr_key, *hdr_val, *body, *version;
-   size_t hdrs_str_len;
+   char *hdrs_str, *hdrs_str_it, *version;
+   size_t hdrs_str_len, hdrs_str_rem;
    httpmsg_header_t *hdr_it;
-   httpres_line_t *line;
-   httpres_stat_t *status;
+   const httpres_line_t *line;
+   const httpres_stat_t *status;
    int send_status;
-
-   /* ensure message has a body, even if empty string */
-   if (res->hm_body < 0) {
-      res->hm_body = HM_STR2OFF(res->hm_text_endp, res);
-   }
-
+   ssize_t bytes_sent;
+   
    /* format headers string */
-   hdrs_str_len = res->hm_text_size + (HM_HDR_SEPLEN+HM_ENT_TERMLEN)*res->hm_nheaders;
-   if ((hdrs_str = malloc(hdrs_str_len + 1)) == NULL) {
+   if ((hdrs_str = strdup("")) == NULL) {
       return -1;
    }
-   
+   hdrs_str_len = 0;
+   hdrs_str_rem = 0;
+
    for (hdr_it = res->hm_headers, hdrs_str_it = hdrs_str;
         hdr_it != res->hm_headers_endp;
         ++hdr_it, hdrs_str_it = strchr(hdrs_str_it, '\0')) {
-      hdr_key = HM_OFF2STR(hdr_it->key, res);
-      hdr_val = HM_OFF2STR(hdr_it->value, res);
-      if (sprintf(hdrs_str_it, "%s"HM_HDR_SEP"%s"HM_ENT_TERM, hdr_key, hdr_val) < 0) {
-         free(hdrs_str);
-         return -1;
+      
+      size_t chars;
+
+      /* calculate remaining free bytes in header string buffer */
+      hdrs_str_rem = hdrs_str_len - (hdrs_str_it - hdrs_str);
+
+      /* try to print header to buffer */
+      chars = snprintf(hdrs_str_it, hdrs_str_rem + 1, "%s"HM_HDR_SEP"%s"HM_ENT_TERM,
+                       hdr_it->key, hdr_it->value);
+
+      /* if snprintf failed due to not enough space, reallocate buffer & repeat */
+      while (chars > hdrs_str_rem) {
+         char *hdrs_newstr;
+
+         /* resize headers string */
+         hdrs_str_len = smax(HM_HDRSTR_INIT, hdrs_str_len * 2);
+         hdrs_newstr = realloc(hdrs_str, hdrs_str_len + 1); // +1 for '\0'
+         if (hdrs_newstr == NULL) {
+            free(hdrs_str);
+            return -1;
+         }
+
+         /* recompute buffer iterator & assign new buffer */
+         hdrs_str_it = hdrs_newstr + (hdrs_str_it - hdrs_str);
+         hdrs_str = hdrs_newstr;
+         hdrs_str_rem = hdrs_str_len - (hdrs_str_it - hdrs_str);
+
+         /* try printing again */
+         chars = snprintf(hdrs_str_it, hdrs_str_rem + 1, "%s"HM_HDR_SEP"%s"HM_ENT_TERM,
+                          hdr_it->key, hdr_it->value);
       }
    }
 
-   /* format & send message header */
+   /* format & send message */
    res_fmt =
       HM_VERSION_PREFIX"%s %d %s"HM_ENT_TERM   // response line
-      "%s"HM_ENT_TERM                          // response headers
-      "%s";                                    // response body
+      "%s"HM_ENT_TERM;                         // response headers
+
    line = &res->hm_line.resl;
    status = line->status;
-   version = HM_OFF2STR(line->version, res);
-   body = HM_OFF2STR(res->hm_body, res);
+   version = line->version;
    send_status = dprintf(conn_fd, res_fmt,
                          version, status->code, status->phrase,       // line args
-                         hdrs_str,                                    // header arg
-                         body);                                       // body arg
-
-   if (DEBUG) {
-      send_status = printf(res_fmt,
-                           version, status->code, status->phrase,       // line args
-                           hdrs_str,                                    // header arg
-                           body);                                       // body arg
-      
-   }
-
-
+                         hdrs_str);                                   // header arg
    free(hdrs_str);
    if (send_status < 0) {
       perror("dprintf");
       return -1;
    }
+
    
+
+   bytes_sent = 0;
+   do {
+      bytes_sent += send(conn_fd, res->hm_body, res->hm_body_size, 0);
+      if (bytes_sent <= 0) {
+         return -1;
+      }
+   } while (bytes_sent < res->hm_body_size);
+                         
    return 0;
 }
+
 
 // higher level operation than response_insert_body() 
 int response_insert_file(const char *path, httpmsg_t *res) {
@@ -610,20 +634,18 @@ int server_handle_get(int conn_fd, const char *docroot, const char *servname, ht
    int code;
 
    /* create response */
-   if (message_init(&res) < 0) {
-      return -1;
-   }
+   message_init(&res);
    
    /* get response code & full path */
    if ((code = document_find(docroot, &path, req)) < 0) {
-      message_delete(&res);
+      response_delete(&res);
       return -1;
    }
       
    /* insert file */
    if (code == C_OK) {
       if (response_insert_file(path, &res) < 0) {
-         message_delete(&res);
+         response_delete(&res);
          free(path);
          return -1;
       }
@@ -638,43 +660,44 @@ int server_handle_get(int conn_fd, const char *docroot, const char *servname, ht
          body = C_FORBIDDEN_BODY;
          break;
       default:
-         message_delete(&res);
+         response_delete(&res);
          errno = EBADRQC;
          return -1;
       }
-      if (response_insert_body(body, strlen(body)+1, CONTENT_TYPE_PLAIN, &res) < 0) {
-         message_delete(&res);
+      // note: strlen(body)+1 causes file to be downloaded?
+      if (response_insert_body(body, strlen(body), CONTENT_TYPE_PLAIN, &res) < 0) {
+         response_delete(&res);
          return -1;
       }
    }
 
    /* insert general headers */
    if (response_insert_genhdrs(&res) < 0) {
-      message_delete(&res);
+      response_delete(&res);
       return -1;
    }
 
    /* insert server headers */
    if (response_insert_servhdrs(servname, &res) < 0) {
-      message_delete(&res);
+      response_delete(&res);
       return -1;
    }
    
    /* set response line */
    if (response_insert_line(code, HM_RES_VERSION, &res) < 0) {
-      message_delete(&res);
+      response_delete(&res);
       return -1;
    }
    
    /* send request */
    if (response_send(conn_fd, &res) < 0) {
-      message_delete(&res);
+      response_delete(&res);
       return -1;
    }
 
    /* cleanup */
-   message_delete(&res);
-   //free(path);
+   response_delete(&res);
+
    return 0;
 }
 
@@ -688,7 +711,7 @@ int document_find(const char *docroot, char **pathp, httpmsg_t *req) {
    int st_mode;
 
    /* locate resource in request line */
-   rsrc = HM_OFF2STR(req->hm_line.reql.uri, req);
+   rsrc = req->hm_line.reql.uri;
 
    /* get entire path */
    if (smprintf(pathp, "%s%s", docroot, rsrc) < 0) {

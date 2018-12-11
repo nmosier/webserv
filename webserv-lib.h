@@ -9,8 +9,8 @@ typedef enum {
 /* HTTP request line */
 typedef struct {
    httpreq_method_t method;
-   off_t uri;
-   off_t version; // not including leading HTTP/
+   char *uri; // free
+   char *version; // not including leading HTTP/; free
 } httpreq_line_t;
 
 /* HTTP response codes */
@@ -22,19 +22,20 @@ typedef struct {
 /* HTTP response statuses */
 typedef struct {
    int code;
-   char *phrase;
+   const char *phrase;
 } httpres_stat_t;
 
 /* HTTP response line */
 typedef struct {
-   off_t version; // not including leading HTTP/
-   httpres_stat_t *status;
+   char *version; // not including leading HTTP/
+   const httpres_stat_t *status;
 } httpres_line_t;
 
 /* HTTP message header */
 typedef struct {
-   off_t key;
-   off_t value;
+   //off_t key;
+   char *key;
+   char *value;
 } httpmsg_header_t;
 
 /* HTTP message */
@@ -44,12 +45,15 @@ typedef struct {
       httpres_line_t resl;
    } hm_line;
    httpmsg_header_t *hm_headers; // null-termianted array of headers
-   int hm_nheaders;
+   size_t hm_nheaders;
    httpmsg_header_t *hm_headers_endp;
-   off_t hm_body;
-   char *hm_text; // request as unparsed string
-   size_t hm_text_size;
-   char *hm_text_endp; // ptr to end of string
+   //off_t hm_body
+   char *hm_body;
+   char *hm_body_ptr;
+   size_t hm_body_size;
+   //char *hm_text; // request as unparsed string
+   //size_t hm_text_size;
+   //char *hm_text_endp; // ptr to end of string
 } httpmsg_t;
 
 
@@ -57,13 +61,19 @@ int server_start(const char *port, int backlog);
 int server_accept(int servfd);
 int server_handle_req(int conn_fd, const char *docroot, const char *servname, httpmsg_t *req);
 int server_handle_get(int conn_fd, const char *docroot, const char *servname, httpmsg_t *req);
-int message_init(httpmsg_t *msg);
+
+size_t message_bodyfree(const httpmsg_t *msg);
+
+void message_init(httpmsg_t *msg);
+
 int request_read(int conn_fd, httpmsg_t *req);
 int request_parse(httpmsg_t *req);
-void message_delete(httpmsg_t *req);
-int message_resize_headers(size_t new_nheaders, httpmsg_t *req);
-int message_resize_text(size_t newsize, httpmsg_t *req);
+void request_delete(httpmsg_t *req);
 
+int message_resize_headers(size_t new_nheaders, httpmsg_t *req);
+int message_resize_body(size_t newsize, httpmsg_t *req);
+
+void response_delete(httpmsg_t *res);
 int response_insert_line(int code, const char *version, httpmsg_t *res);
 int response_insert_header(const char *key, const char *val, httpmsg_t *res);
 int response_insert_body(const char *body, size_t bodylen, const char *type, httpmsg_t *res);
@@ -84,13 +94,13 @@ enum {
    DOC_FIND_ENOTFOUND
 };
 
-#define HTTPMSG_TEXTSZ (0x1000-1)
+//#define HTTPMSG_TEXTSZ (0x1000-1)
 #define HTTPMSG_NHEADS 10
 
-#define HM_OFF2STR(off, msg)  ((msg)->hm_text + (off))
-#define HM_STR2OFF(str, msg)  ((str) - (msg)->hm_text)
+//#define HM_OFF2STR(off, msg)  ((msg)->hm_text + (off))
+//#define HM_STR2OFF(str, msg)  ((str) - (msg)->hm_text)
 
-#define HM_TEXTFREE(req) ((req)->hm_text_size - ((req)->hm_text_endp - (req)->hm_text))
+//#define HM_TEXTFREE(req) ((req)->hm_text_size - ((req)->hm_text_endp - (req)->hm_text))
 
 
 #define HM_HDR_SEP    ": "
@@ -99,6 +109,9 @@ enum {
 #define HM_ENT_TERMLEN strlen(HM_ENT_TERM)
 #define HM_VERSION_PREFIX "HTTP/"
 
+#define HM_BODY_INIT   0x1000
+#define HM_NHEADERS_INIT 16
+#define HM_HDRSTR_INIT 0x0800
 
 #define HM_HDR_CONTENTTYPE  "Content-Type"
 #define HM_HDR_CONTENTLEN   "Content-Length"

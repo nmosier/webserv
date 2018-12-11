@@ -63,10 +63,7 @@ void *client_loop(void *args) {
    thd_args = (struct client_thread_args *) args;
    client_fd = thd_args->client_fd;
    retv = -1; // error by default
-   if (message_init(&req) < 0) {
-      perror("message_init");
-      return (void *) -1;
-   }
+   message_init(&req);
 
    /* read request to completion */
    while ((req_stat = request_read(client_fd, &req)) < 0
@@ -95,7 +92,7 @@ void *client_loop(void *args) {
       perror("close");
       retv = -1;
    }
-   message_delete(&req);
+   request_delete(&req);
 
    return (void *) retv;
 }
