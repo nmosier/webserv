@@ -154,6 +154,6 @@ int server_loop(int servfd) {
 }
 
 
-int server_handle_event(size_t fd_index, httpfds_t *hfds) {
+void server_handle_event(size_t fd_index, httpfds_t *hfds) {
 
 }
