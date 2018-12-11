@@ -590,7 +590,6 @@ int response_insert_genhdrs(httpmsg_t *res) {
    return 0;
 }
 
-// TODO
 int response_insert_servhdrs(const char *servname, httpmsg_t *res) {
    struct utsname sysinfo;
    char *serv;
@@ -684,7 +683,7 @@ int server_handle_get(int conn_fd, const char *docroot, const char *servname, ht
    }
    
    /* set response line */
-   if (response_insert_line(code, HM_RES_VERSION, &res) < 0) {
+   if (response_insert_line(code, HM_HTTP_VERSION, &res) < 0) {
       response_delete(&res);
       return -1;
    }

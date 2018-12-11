@@ -94,19 +94,8 @@ enum {
    DOC_FIND_ENOTFOUND
 };
 
-//#define HTTPMSG_TEXTSZ (0x1000-1)
-#define HTTPMSG_NHEADS 10
-
-//#define HM_OFF2STR(off, msg)  ((msg)->hm_text + (off))
-//#define HM_STR2OFF(str, msg)  ((str) - (msg)->hm_text)
-
-//#define HM_TEXTFREE(req) ((req)->hm_text_size - ((req)->hm_text_endp - (req)->hm_text))
-
-
 #define HM_HDR_SEP    ": "
-#define HM_HDR_SEPLEN strlen(HM_HDR_SEP)
 #define HM_ENT_TERM   "\r\n"
-#define HM_ENT_TERMLEN strlen(HM_ENT_TERM)
 #define HM_VERSION_PREFIX "HTTP/"
 
 #define HM_BODY_INIT   0x1000
@@ -120,12 +109,7 @@ enum {
 #define HM_HDR_SERVER       "Server"
 #define HM_HDR_CONNECTION   "Connection"
 
-//#define HM_HDR_LASTMODIFIED_EXAMPLE "Tue, 15 Nov 1994 08:12:31 GMT"
-
 #define C_NOTFOUND_BODY  "Not Found"
 #define C_FORBIDDEN_BODY "Forbidden"
 
-#define HM_RES_VERSION "1.1"
-
-
-#define INTLEN(itype) (sizeof(itype) * 4)
+#define HM_HTTP_VERSION "1.1"

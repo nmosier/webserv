@@ -12,7 +12,15 @@
 #include "webserv-lib.h"
 #include "webserv-dbg.h"
 #include "webserv-main.h"
-#include "webserv-multi.h"
+
+/* types */
+struct client_thread_args {
+   int client_fd;
+};
+
+/* prototypes */
+void *client_loop(void *args);
+
 
 int server_loop(int servfd) {
    int retv;

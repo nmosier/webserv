@@ -13,10 +13,9 @@
 #include "webserv-fds.h"
 #include "webserv-dbg.h"
 #include "webserv-main.h"
-#include "webserv-single.h"
-
 
 // TODO: make it so it doesn't close servfd
+
 int server_loop(int servfd) {
    httpfds_t hfds;
    int retv;
