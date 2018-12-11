@@ -91,10 +91,6 @@ int server_accept(int servfd) {
    return client_fd;
 }
 
-
-
-
-
 // EXPLAIN DESIGN DECISION
 // nonblocking -- so super-slow connections don't gum up the works
 // returns -1 & error EAGAIN or EWOULDBLOCK if not available
