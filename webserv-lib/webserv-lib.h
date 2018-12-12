@@ -67,11 +67,13 @@ int message_resize_headers(size_t new_nheaders, httpmsg_t *msg);
 int message_resize_body(size_t newsize, httpmsg_t *msg);
 int message_resize_text(size_t newsize, httpmsg_t *msg);
 
+void request_init(httpmsg_t *req);
 int request_read(int conn_fd, httpmsg_t *req);
 int request_parse(httpmsg_t *req);
 void request_delete(httpmsg_t *req);
 int request_document_find(const char *docroot, char **pathp, httpmsg_t *req);
 
+void response_init(httpmsg_t *res);
 void response_delete(httpmsg_t *res);
 int response_insert_line(int code, const char *version, httpmsg_t *res);
 int response_insert_header(const char *key, const char *val, httpmsg_t *res);

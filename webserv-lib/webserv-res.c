@@ -17,6 +17,10 @@
 #include "webserv-dbg.h"
 
 /*************** HTTP RESPONSE FUNCTIONS ***************/
+void response_init(httpmsg_t *res) {
+   message_init(res);
+}
+
 void response_delete(httpmsg_t *res) {
    message_delete(res);
 

@@ -17,6 +17,10 @@
 #include "webserv-dbg.h"
 
 /*************** HTTP REQUEST FUNCTIONS ***************/
+void request_init(httpmsg_t *req) {
+   message_init(req);
+}
+
 int request_read(int conn_fd, httpmsg_t *req) {
    ssize_t bytes_received;
    size_t bytes_free, newsize;
