@@ -49,6 +49,9 @@ typedef struct {
    char *hm_body;
    char *hm_body_ptr;
    size_t hm_body_size;
+   char *hm_text; // full message contents (hdrs + body)
+   size_t hm_text_size;
+   char *hm_text_ptr;
 } httpmsg_t;
 
 
@@ -57,11 +60,12 @@ int server_accept(int servfd);
 int server_handle_req(int conn_fd, const char *docroot, const char *servname, httpmsg_t *req);
 int server_handle_get(int conn_fd, const char *docroot, const char *servname, httpmsg_t *req);
 
-size_t message_bodyfree(const httpmsg_t *msg);
+size_t message_textfree(const httpmsg_t *msg);
 void message_init(httpmsg_t *msg);
 void message_delete(httpmsg_t *msg);
-int message_resize_headers(size_t new_nheaders, httpmsg_t *req);
-int message_resize_body(size_t newsize, httpmsg_t *req);
+int message_resize_headers(size_t new_nheaders, httpmsg_t *msg);
+int message_resize_body(size_t newsize, httpmsg_t *msg);
+int message_resize_text(size_t newsize, httpmsg_t *msg);
 
 int request_read(int conn_fd, httpmsg_t *req);
 int request_parse(httpmsg_t *req);
@@ -91,7 +95,7 @@ enum {
 #define HM_ENT_TERM   "\r\n"
 #define HM_VERSION_PREFIX "HTTP/"
 
-#define HM_BODY_INIT   0x1000
+#define HM_TEXT_INIT   0x1000
 #define HM_NHEADERS_INIT 16
 #define HM_HDRSTR_INIT 0x0800
 

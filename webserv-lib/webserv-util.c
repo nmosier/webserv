@@ -1,11 +1,9 @@
 #include <string.h>
 #include <stdio.h>
 #include <sys/utsname.h>
+#include "webserv-lib.h"
 #include "webserv-util.h"
 #include "webserv-dbg.h"
-
-
-
 
 char *strstrip(char *str, char *strip) {
    while (*str && strchr(strip, *str)) {
@@ -100,4 +98,36 @@ size_t smax(size_t s1, size_t s2) {
 
 size_t smin(size_t s1, size_t s2) {
    return (s1 < s2) ? s1 : s2;
+}
+
+
+
+
+typedef struct {
+   const char *str;
+   httpreq_method_t meth;
+} hr_str2meth_t;
+
+static hr_str2meth_t hr_str2meth_v[] = {
+   {"GET", M_GET},
+   {0,            0}
+};
+
+
+httpreq_method_t hr_str2meth(const char *str) {
+   for (hr_str2meth_t *it = hr_str2meth_v; it->str; ++it) {
+      if (strcmp(it->str, str) == 0) {
+         return it->meth;
+      }
+   }
+   return -1;
+}
+
+const char *hr_meth2str(httpreq_method_t meth) {
+   for (hr_str2meth_t *it = hr_str2meth_v; it->str; ++it) {
+      if (meth == it->meth) {
+         return it->str;
+      }
+   }
+   return NULL;
 }
