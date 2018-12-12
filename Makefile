@@ -1,6 +1,9 @@
-OFLAGS=-Wall -pedantic -g -c -fPIC
+LIBDIR=webserv-lib
+
+OFLAGS=-Wall -I$(LIBDIR) -pedantic -g -c -fPIC
 SOFLAGS=-shared
-LIBFLAGS=-L. -lwebserv
+LIBFLAGS=-L$(LIBDIR) -lwebserv
+
 
 OBJS_SINGLE=webserv-main.o webserv-single.o webserv-fds.o
 OBJS_MULTI=webserv-main.o webserv-multi.o
@@ -8,8 +11,8 @@ OBJS_MULTI=webserv-main.o webserv-multi.o
 .PHONY: all
 all: webserv-multi webserv-single
 
-libwebserv.so: webserv-lib.o webserv-util.o
-	gcc $(SOFLAGS) -o $@ $^
+libwebserv.so: $(LIBDIR)/$@
+	cd $(LIBDIR) && make $@
 
 webserv-multi: $(OBJS_MULTI) libwebserv.so
 	gcc -o $@ $(OBJS_MULTI) -pthread $(LIBFLAGS)
@@ -25,4 +28,5 @@ webserv-multi.o: webserv-multi.c
 
 .PHONY: clean
 clean:
-	rm -f *.o *.so webserv-multi webserv-single
+	rm -f $(OBJS_SINGLE) $(OBJS_MULTI) webserv-multi webserv-single
+	cd $(LIBDIR) && make clean
