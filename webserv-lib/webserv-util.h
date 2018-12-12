@@ -39,4 +39,7 @@ int hm_fmtdate(const time_t *sec_ptr, char **time_str);
 size_t smin(size_t s1, size_t s2);
 size_t smax(size_t s1, size_t s2);
 
+httpreq_method_t hr_str2meth(const char *str);
+const char *hr_meth2str(httpreq_method_t meth);
+
 #endif

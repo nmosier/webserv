@@ -59,6 +59,7 @@ int server_handle_get(int conn_fd, const char *docroot, const char *servname, ht
 
 size_t message_bodyfree(const httpmsg_t *msg);
 void message_init(httpmsg_t *msg);
+void message_delete(httpmsg_t *msg);
 int message_resize_headers(size_t new_nheaders, httpmsg_t *req);
 int message_resize_body(size_t newsize, httpmsg_t *req);
 
