@@ -14,7 +14,8 @@
 #include "webserv-dbg.h"
 #include "webserv-main.h"
 
-// TODO: make it so it doesn't close servfd
+int handle_pollevents_server(int servfd, int revents, httpfds_t *hfds);
+int handle_pollevents_client(int clientfd, int index, int revents, httpfds_t *hfds);
 
 int server_loop(int servfd) {
    httpfds_t hfds;
@@ -62,76 +63,12 @@ int server_loop(int servfd) {
          revents = hfds.fds[i].revents;
          if (fd >= 0 && revents) {
             if (fd == servfd) {
-               if (revents & POLLERR) {
-                  /* server error */
-                  fprintf(stderr, "server_loop: server socket error\n");
-                  if (httpfds_delete(&hfds) < 0) {
-                     perror("httpfds_delete");
-                  }
+               if (handle_pollevents_server(fd, revents, &hfds) < 0) {
                   return -1;
-               } else if (revents & POLLIN) {
-                  int new_client_fd;
-                  
-                  /* accept new connection */
-                  if ((new_client_fd = server_accept(fd)) < 0) {
-                     perror("server_accept");
-                     if (httpfds_delete(&hfds) < 0) {
-                        perror("httpfds_delete");
-                     }
-                     return -1;
-                  }
-                  /* add new connection to list */
-                  if (httpfds_insert(new_client_fd, POLLIN, &hfds) < 0) {
-                     perror("httpfds_insert");
-                     return -1;
-                  }
                }
             } else {
-               if (revents & POLLERR) {
-                  /* close client socket & mark as closed */
-                  if (httpfds_remove(i, &hfds) < 0) {
-                     perror("httpds_remove");
-                     retv = -1;
-                  }
-               } else if (revents & POLLIN) {
-                  int rm_fd;
-                  httpmsg_t *reqp;
-
-                  /* initialize variables */
-                  reqp = &hfds.reqs[i];
-                  rm_fd = 0; // don't remove fd by default
-                  
-                  /* read data */
-                  if (request_read(fd, reqp) < 0) {
-                     /* incomplete read */
-                     if (errno != EAGAIN && errno != EWOULDBLOCK) {
-                        /* fatal error (unrelated to blocking) */
-                        perror("request_read");
-                        rm_fd = 1;
-                        retv = -1;
-                     }
-                  } else {
-                     /* parse complete request */
-                     if (request_parse(reqp) < 0) {
-                        perror("request_parse");
-                        rm_fd = 1;
-                        if (errno != EBADMSG) {
-                           retv = -1; // internal error
-                        }
-                     } else {
-                        if (server_handle_req(fd, DOCUMENT_ROOT, SERVER_NAME, reqp) < 0) {
-                           perror("server_handle_req");
-                           retv = -1;
-                        }
-                        rm_fd = 1; // done receiving data
-                     }
-                  }
-                  
-                  if (rm_fd && httpfds_remove(i, &hfds) < 0) {
-                     perror("httpfds_remove");
-                     retv = -1;
-                  }
-
+               if (handle_pollevents_client(fd, i, revents, &hfds) < 0) {
+                  return -1;
                }
             }
             
@@ -147,6 +84,111 @@ int server_loop(int servfd) {
    if (httpfds_delete(&hfds) < 0) {
       perror("httpfds_delete");
       retv = -1;
+   }
+
+   return retv;
+}
+
+
+int handle_pollevents_server(int servfd, int revents, httpfds_t *hfds) {
+   if (revents & POLLERR) {
+      /* server error */
+      fprintf(stderr, "server_loop: server socket error\n");
+      if (httpfds_delete(hfds) < 0) {
+         perror("httpfds_delete");
+      }
+      
+      return -1;
+   } else if (revents & POLLIN) {
+      int new_client_fd;
+      
+      /* accept new connection */
+      if ((new_client_fd = server_accept(servfd)) < 0) {
+         perror("server_accept");
+         if (httpfds_delete(hfds) < 0) {
+            perror("httpfds_delete");
+         }
+         return -1;
+      }
+      
+      /* add new connection to list */
+      if (httpfds_insert(new_client_fd, POLLIN, hfds) < 0) {
+         perror("httpfds_insert");
+         return -1;
+      }
+   }
+
+   return 0;
+}
+
+
+int handle_pollevents_client(int clientfd, int index, int revents, httpfds_t *hfds) {
+   int retv = 0;
+
+   if (revents & POLLERR) {
+      /* close client socket & mark as closed */
+      if (httpfds_remove(index, hfds) < 0) {
+         perror("httpds_remove");
+         retv = -1;
+      }
+   } else if (revents & POLLIN) {
+      httpmsg_t *reqp, *resp;
+      
+      /* initialize variables */
+      reqp = &hfds->reqs[index];
+      resp = &hfds->resps[index];
+      
+      /* read data */
+      if (request_read(clientfd, reqp) < 0) {
+         /* incomplete read -- check if due to nonblocking */
+         if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            /* fatal error (unrelated to blocking) */
+            perror("request_read");
+            if (httpfds_remove(index, hfds) < 0) {
+               perror("httpfds_remove");
+            }
+            retv = -1;
+         }
+      } else {
+         /* finished reading request */
+         /* parse complete request */
+         if (request_parse(reqp) < 0) {
+            /* parser error */
+            perror("request_parse");
+            if (httpfds_remove(index, hfds) < 0) {
+               perror("httpfds_remove");
+               retv = -1;
+            }
+            if (errno != EBADMSG) {
+               retv = -1; // internal error
+            }
+         } else {
+            /* successfully parse request */
+            /* create response for request */
+            if (server_handle_req(clientfd, DOCUMENT_ROOT, SERVER_NAME, reqp, resp) < 0) {
+               perror("server_handle_req");
+               retv = -1;
+            }
+
+            /* mark pollfd as ready to receive data */
+            hfds->fds[index].events = POLLOUT;
+         }
+      }
+   } else if (revents & POLLOUT) {
+      /* send response */
+      if (response_send(clientfd, &hfds->resps[index]) < 0) {
+         /* incomplete write -- check if due to nonblocking */
+         if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            perror("response_send");
+            return -1;
+         }
+      } else {
+         /* sending completed -- can remove httpfd */
+         if (httpfds_remove(index, hfds) < 0) {
+            perror("httpfds_remove");
+            return -1;
+         }
+      }
    }
 
    return retv;
