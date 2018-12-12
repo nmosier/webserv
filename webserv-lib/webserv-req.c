@@ -158,6 +158,9 @@ void request_delete(httpmsg_t *req) {
       free(req->hm_line.reql.uri);
       free(req->hm_line.reql.version);
    }
+
+   /* zero out record */
+   memset(req, 0, sizeof(httpmsg_t));
 }
 
 // finds document

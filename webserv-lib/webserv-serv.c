@@ -91,10 +91,12 @@ int server_accept(int servfd) {
 }
 
 
-int server_handle_req(int conn_fd, const char *docroot, const char *servname, httpmsg_t *req) {
+// returns response
+int server_handle_req(int conn_fd, const char *docroot, const char *servname,
+                      httpmsg_t *req, httpmsg_t *res) {
    switch (req->hm_line.reql.method) {
    case M_GET:
-      return server_handle_get(conn_fd, docroot, servname, req);
+      return server_handle_get(conn_fd, docroot, servname, req, res);
    default:
       errno = EBADRQC;
       return -1;
@@ -104,24 +106,24 @@ int server_handle_req(int conn_fd, const char *docroot, const char *servname, ht
 
 // handle GET request
 // TODO: make case statement table-driven, not switch case
-int server_handle_get(int conn_fd, const char *docroot, const char *servname, httpmsg_t *req) {
-   httpmsg_t res;
+int server_handle_get(int conn_fd, const char *docroot, const char *servname, httpmsg_t *req,
+                      httpmsg_t *res) {
    char *path;
    int code;
 
    /* create response */
-   message_init(&res);
+   response_init(res);
    
    /* get response code & full path */
    if ((code = request_document_find(docroot, &path, req)) < 0) {
-      response_delete(&res);
+      response_delete(res);
       return -1;
    }
       
    /* insert file */
    if (code == C_OK) {
-      if (response_insert_file(path, &res) < 0) {
-         response_delete(&res);
+      if (response_insert_file(path, res) < 0) {
+         response_delete(res);
          free(path);
          return -1;
       }
@@ -136,43 +138,34 @@ int server_handle_get(int conn_fd, const char *docroot, const char *servname, ht
          body = C_FORBIDDEN_BODY;
          break;
       default:
-         response_delete(&res);
+         response_delete(res);
          errno = EBADRQC;
          return -1;
       }
       // note: strlen(body)+1 causes file to be downloaded?
-      if (response_insert_body(body, strlen(body), CONTENT_TYPE_PLAIN, &res) < 0) {
-         response_delete(&res);
+      if (response_insert_body(body, strlen(body), CONTENT_TYPE_PLAIN, res) < 0) {
+         response_delete(res);
          return -1;
       }
    }
 
    /* insert general headers */
-   if (response_insert_genhdrs(&res) < 0) {
-      response_delete(&res);
+   if (response_insert_genhdrs(res) < 0) {
+      response_delete(res);
       return -1;
    }
 
    /* insert server headers */
-   if (response_insert_servhdrs(servname, &res) < 0) {
-      response_delete(&res);
+   if (response_insert_servhdrs(servname, res) < 0) {
+      response_delete(res);
       return -1;
    }
    
    /* set response line */
-   if (response_insert_line(code, HM_HTTP_VERSION, &res) < 0) {
-      response_delete(&res);
+   if (response_insert_line(code, HM_HTTP_VERSION, res) < 0) {
+      response_delete(res);
       return -1;
    }
    
-   /* send request */
-   if (response_send(conn_fd, &res) < 0) {
-      response_delete(&res);
-      return -1;
-   }
-
-   /* cleanup */
-   response_delete(&res);
-
    return 0;
 }

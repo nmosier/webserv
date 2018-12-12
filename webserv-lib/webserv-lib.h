@@ -57,8 +57,10 @@ typedef struct {
 
 int server_start(const char *port, int backlog);
 int server_accept(int servfd);
-int server_handle_req(int conn_fd, const char *docroot, const char *servname, httpmsg_t *req);
-int server_handle_get(int conn_fd, const char *docroot, const char *servname, httpmsg_t *req);
+int server_handle_req(int conn_fd, const char *docroot, const char *servname,
+                      httpmsg_t *req, httpmsg_t *res);
+int server_handle_get(int conn_fd, const char *docroot, const char *servname, httpmsg_t *req,
+                      httpmsg_t *res);
 
 size_t message_textfree(const httpmsg_t *msg);
 void message_init(httpmsg_t *msg);

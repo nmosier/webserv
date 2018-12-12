@@ -82,8 +82,6 @@ int response_insert_header(const char *key, const char *val, httpmsg_t *res) {
 int response_insert_body(const char *body, size_t bodylen, const char *type, httpmsg_t *res) {
    char *bodylen_str;
 
-   printf("body=%s\n", body);
-   
    /* resize response's text */
    if (message_resize_body(bodylen, res) < 0) {
       return -1;
@@ -146,111 +144,98 @@ int response_send(int conn_fd, httpmsg_t *res) {
    const httpres_stat_t *status;
    ssize_t bytes_sent;
 
-   //printf("BODY=%s\n", res->hm_body);
-
    if (res->hm_text == NULL) {
-   /* format headers string */
-   if ((hdrs_str = strdup("")) == NULL) {
-      return -1;
-   }
-   hdrs_str_len = 0;
-   hdrs_str_rem = 0;
-
-   for (hdr_it = res->hm_headers, hdrs_str_it = hdrs_str;
-        hdr_it != res->hm_headers_endp;
-        ++hdr_it, hdrs_str_it = strchr(hdrs_str_it, '\0')) {
+      /* format headers string */
+      if ((hdrs_str = strdup("")) == NULL) {
+         return -1;
+      }
+      hdrs_str_len = 0;
+      hdrs_str_rem = 0;
       
-      size_t chars;
-
-      /* calculate remaining free bytes in header string buffer */
-      hdrs_str_rem = hdrs_str_len - (hdrs_str_it - hdrs_str);
-
-      /* try to print header to buffer */
-      chars = snprintf(hdrs_str_it, hdrs_str_rem + 1, "%s"HM_HDR_SEP"%s"HM_ENT_TERM,
-                       hdr_it->key, hdr_it->value);
-
-      /* if snprintf failed due to not enough space, reallocate buffer & repeat */
-      while (chars > hdrs_str_rem) {
-         char *hdrs_newstr;
-
-         /* resize headers string */
-         hdrs_str_len = smax(HM_HDRSTR_INIT, hdrs_str_len * 2);
-         hdrs_newstr = realloc(hdrs_str, hdrs_str_len + 1); // +1 for '\0'
-         if (hdrs_newstr == NULL) {
-            free(hdrs_str);
-            return -1;
-         }
-
-         /* recompute buffer iterator & assign new buffer */
-         hdrs_str_it = hdrs_newstr + (hdrs_str_it - hdrs_str);
-         hdrs_str = hdrs_newstr;
+      for (hdr_it = res->hm_headers, hdrs_str_it = hdrs_str;
+           hdr_it != res->hm_headers_endp;
+           ++hdr_it, hdrs_str_it = strchr(hdrs_str_it, '\0')) {
+         
+         size_t chars;
+         
+         /* calculate remaining free bytes in header string buffer */
          hdrs_str_rem = hdrs_str_len - (hdrs_str_it - hdrs_str);
-
-         /* try printing again */
+         
+         /* try to print header to buffer */
          chars = snprintf(hdrs_str_it, hdrs_str_rem + 1, "%s"HM_HDR_SEP"%s"HM_ENT_TERM,
                           hdr_it->key, hdr_it->value);
+         
+         /* if snprintf failed due to not enough space, reallocate buffer & repeat */
+         while (chars > hdrs_str_rem) {
+            char *hdrs_newstr;
+            
+            /* resize headers string */
+            hdrs_str_len = smax(HM_HDRSTR_INIT, hdrs_str_len * 2);
+            hdrs_newstr = realloc(hdrs_str, hdrs_str_len + 1); // +1 for '\0'
+            if (hdrs_newstr == NULL) {
+               free(hdrs_str);
+               return -1;
+            }
+            
+            /* recompute buffer iterator & assign new buffer */
+            hdrs_str_it = hdrs_newstr + (hdrs_str_it - hdrs_str);
+            hdrs_str = hdrs_newstr;
+            hdrs_str_rem = hdrs_str_len - (hdrs_str_it - hdrs_str);
+            
+            /* try printing again */
+            chars = snprintf(hdrs_str_it, hdrs_str_rem + 1, "%s"HM_HDR_SEP"%s"HM_ENT_TERM,
+                             hdr_it->key, hdr_it->value);
+         }
       }
-   }
-
-   /* format & send message */
-   res_fmt =
-      HM_VERSION_PREFIX"%s %d %s"HM_ENT_TERM   // response line
-      "%s"HM_ENT_TERM;                         // response headers
-
-   line = &res->hm_line.resl;
-   status = line->status;
-   version = line->version;
-
-   /* calculate total length of message */
-   int base_len;
-   size_t msg_len;
-   base_len = snprintf(NULL, 0, res_fmt, version, status->code, status->phrase, hdrs_str);
-   if (base_len < 0) {
-      perror("snprintf");
+      
+      /* format & send message */
+      res_fmt =
+         HM_VERSION_PREFIX"%s %d %s"HM_ENT_TERM   // response line
+         "%s"HM_ENT_TERM;                         // response headers
+      
+      line = &res->hm_line.resl;
+      status = line->status;
+      version = line->version;
+      
+      /* calculate total length of message */
+      int base_len;
+      size_t msg_len;
+      base_len = snprintf(NULL, 0, res_fmt, version, status->code, status->phrase, hdrs_str);
+      if (base_len < 0) {
+         perror("snprintf");
+         free(hdrs_str);
+         return -1;
+      }
+      
+      /* allocate message */
+      msg_len = base_len + res->hm_body_size;
+      if ((res->hm_text = malloc(msg_len + 1)) == NULL) { // +1 if no body & need to write '\0'
+         perror("malloc");
+         free(hdrs_str);
+         return -1;
+      };
+      
+      /* copy data into message */
+      if (sprintf(res->hm_text, res_fmt, version, status->code, status->phrase, hdrs_str) < 0) {
+         perror("sprintf");
+         free(hdrs_str);
+         return -1;
+      }
+      if (res->hm_body) {
+         memcpy(res->hm_text + base_len, res->hm_body, res->hm_body_size);
+      }
+      
+      /* update response fields */
+      res->hm_text_ptr = res->hm_text;
+      res->hm_text_size = msg_len;
+      
       free(hdrs_str);
-      return -1;
-   }
-
-   /* allocate message */
-   msg_len = base_len + res->hm_body_size;
-   if ((res->hm_text = malloc(msg_len + 1)) == NULL) { // +1 if no body & need to write '\0'
-      perror("malloc");
-      free(hdrs_str);
-      return -1;
-   };
-
-   /* copy data into message */
-   if (sprintf(res->hm_text, res_fmt, version, status->code, status->phrase, hdrs_str) < 0) {
-      perror("sprintf");
-      free(hdrs_str);
-      return -1;
-   }
-   if (res->hm_body) {
-      memcpy(res->hm_text + base_len, res->hm_body, res->hm_body_size);
-   }
-
-   /* update response fields */
-   res->hm_text_ptr = res->hm_text;
-   res->hm_text_size = msg_len;
-   
-   //send_status = dprintf(conn_fd, res_fmt,
-   //                         version, status->code, status->phrase,       // line args
-   //                         hdrs_str);                                   // header arg
-
-   free(hdrs_str);
-   /*
-   if (send_status < 0) {
-      perror("dprintf");
-      return -1;
-   }
-   */
-
    }   
-
-   size_t bytes_left = res->hm_text_size;
+   
+   size_t bytes_left = message_textfree(res);
    while (bytes_left > 0) {
-      bytes_sent = send(conn_fd, res->hm_text_ptr, bytes_left, 0); // TODO
-      if (bytes_sent <= 0) {
+      bytes_sent = send(conn_fd, res->hm_text_ptr, bytes_left, MSG_DONTWAIT);
+      if (bytes_sent < 0) {
          return -1;
       }
       res->hm_text_ptr += bytes_sent;
