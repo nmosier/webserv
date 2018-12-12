@@ -28,8 +28,8 @@ int server_loop(int servfd) {
    /* insert server socket to list */
    if (httpfds_insert(servfd, POLLIN, &hfds) < 0) {
       perror("httpfds_insert");
-      if (httpfds_cleanup(&hfds) < 0) {
-         perror("httpfds_cleanup");
+      if (httpfds_delete(&hfds) < 0) {
+         perror("httpfds_delete");
       }
       return -1;
    }
@@ -44,8 +44,8 @@ int server_loop(int servfd) {
       
       if ((nready = poll(hfds.fds, hfds.count, -1)) < 0) {
          perror("poll");
-         if (httpfds_cleanup(&hfds) < 0) {
-            perror("httpfds_cleanup");
+         if (httpfds_delete(&hfds) < 0) {
+            perror("httpfds_delete");
          }
          return -1;
       }
@@ -65,8 +65,8 @@ int server_loop(int servfd) {
                if (revents & POLLERR) {
                   /* server error */
                   fprintf(stderr, "server_loop: server socket error\n");
-                  if (httpfds_cleanup(&hfds) < 0) {
-                     perror("httpfds_cleanup");
+                  if (httpfds_delete(&hfds) < 0) {
+                     perror("httpfds_delete");
                   }
                   return -1;
                } else if (revents & POLLIN) {
@@ -75,8 +75,8 @@ int server_loop(int servfd) {
                   /* accept new connection */
                   if ((new_client_fd = server_accept(fd)) < 0) {
                      perror("server_accept");
-                     if (httpfds_cleanup(&hfds) < 0) {
-                        perror("httpfds_cleanup");
+                     if (httpfds_delete(&hfds) < 0) {
+                        perror("httpfds_delete");
                      }
                      return -1;
                   }
@@ -144,15 +144,10 @@ int server_loop(int servfd) {
       httpfds_pack(&hfds); // never fails
    }
    
-   if (httpfds_cleanup(&hfds) < 0) {
-      perror("httpfds_cleanup");
+   if (httpfds_delete(&hfds) < 0) {
+      perror("httpfds_delete");
       retv = -1;
    }
 
    return retv;
-}
-
-
-void server_handle_event(size_t fd_index, httpfds_t *hfds) {
-
 }
