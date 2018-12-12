@@ -1,7 +1,7 @@
 OFLAGS=-Wall -pedantic -g -c -fPIC
 SOFLAGS=-shared
 
-OBJS=webserv-lib.o webserv-util.o
+OBJS=webserv-serv.o webserv-msg.o webserv-req.o webserv-res.o webserv-util.o
 
 libwebserv.so: $(OBJS)
 	gcc $(SOFLAGS) -o $@ $^
