@@ -21,7 +21,6 @@ struct client_thread_args {
 /* prototypes */
 void *client_loop(void *args);
 
-
 int server_loop(int servfd) {
    int retv;
 
@@ -63,20 +62,21 @@ int server_loop(int servfd) {
 void *client_loop(void *args) {
    struct client_thread_args *thd_args;
    int client_fd;
-   httpmsg_t req;
-   int req_stat;
-   int64_t retv; // sizeof(long long) == sizeof(void *)
+   httpmsg_t req, res;
+   int msg_stat;
+   void *retv;
 
    /* initialize variables */
    thd_args = (struct client_thread_args *) args;
    client_fd = thd_args->client_fd;
-   retv = -1; // error by default
-   message_init(&req);
+   retv = (void *) -1; // error by default
+   request_init(&req);
+   response_init(&res);
 
    /* read request to completion */
-   while ((req_stat = request_read(client_fd, &req)) < 0
+   while ((msg_stat = request_read(client_fd, &req)) < 0
           && (errno == EAGAIN || errno == EWOULDBLOCK)) {}
-   if (req_stat < 0) {
+   if (msg_stat < 0) {
       perror("request_read");
       goto cleanup;
    }
@@ -87,20 +87,29 @@ void *client_loop(void *args) {
       goto cleanup;
    }
    
-   /* handle request */
-   if (server_handle_req(client_fd, DOCUMENT_ROOT, SERVER_NAME, &req) < 0) {
+   /* create response */
+   if (server_handle_req(client_fd, DOCUMENT_ROOT, SERVER_NAME, &req, &res) < 0) {
       perror("server_handle_get");
       goto cleanup;
    }
 
-   retv = 0;
+   /* send response */
+   while ((msg_stat = response_send(client_fd, &res)) < 0
+          && (errno == EAGAIN || errno == EWOULDBLOCK)) {}
+   if (msg_stat < 0) {
+      perror("request_send");
+      goto cleanup;
+   }
+
+   retv = (void *) 0;
    
  cleanup:
    if (close(client_fd) < 0) {
       perror("close");
-      retv = -1;
+      retv = (void *) -1;
    }
    request_delete(&req);
+   response_delete(&res);
 
-   return (void *) retv;
+   return retv;
 }
