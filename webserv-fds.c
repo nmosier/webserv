@@ -65,6 +65,7 @@ int httpfds_insert(int fd, int events, httpfds_t *hfds) {
    response_init(respentry);
 
    ++hfds->count;
+   ++hfds->nopen;
    
    return 0;
 }
@@ -90,6 +91,7 @@ int httpfds_remove(size_t index, httpfds_t *hfds) {
       *fdp = -1; // mark as deleted
       request_delete(reqp);
       response_delete(resp);
+      --hfds->nopen; // update number open
    }
    
    return retv;
