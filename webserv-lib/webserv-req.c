@@ -41,9 +41,6 @@ int request_read(int conn_fd, httpmsg_t *req) {
    /* receive bytes */
    bytes_received = recv(conn_fd, req->hm_text_ptr, bytes_free, MSG_DONTWAIT);
    if (bytes_received < 0) {
-      if (errno != EAGAIN && errno != EWOULDBLOCK) {
-         perror("recv");
-      }
       return -1;
    }
 

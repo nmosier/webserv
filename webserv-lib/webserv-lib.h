@@ -68,6 +68,8 @@ void message_delete(httpmsg_t *msg);
 int message_resize_headers(size_t new_nheaders, httpmsg_t *msg);
 int message_resize_body(size_t newsize, httpmsg_t *msg);
 int message_resize_text(size_t newsize, httpmsg_t *msg);
+int message_error(int msg_errno);
+
 
 void request_init(httpmsg_t *req);
 int request_read(int conn_fd, httpmsg_t *req);
@@ -94,6 +96,14 @@ enum {
    DOC_FIND_EINTERNAL,
    DOC_FIND_ENOTFOUND
 };
+
+enum {
+   MSG_ESUCCESS = 0, // no error
+   MSG_EAGAIN,   // interrupt/blocking "errors"
+   MSG_ECONN,    // connection errors
+   MSG_ESERV     // internal server error
+};
+
 
 #define HM_HDR_SEP    ": "
 #define HM_ENT_TERM   "\r\n"

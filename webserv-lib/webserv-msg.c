@@ -106,8 +106,41 @@ int message_resize_text(size_t newsize, httpmsg_t *msg) {
    msg->hm_text_size = newsize;
    msg->hm_text_ptr += newtext - msg->hm_text;
    msg->hm_text = newtext;
-
+   
    return 0;
 }
 
 
+
+/* message_error()
+ * DESC: classifes error of [ message_* | request_* | response_* ] function
+ * ARGS:
+ *  - errno: error number upon request_read()'s exit
+ * RETV:
+ *  - MSG_ESUCCESS if no error occurred
+ *  - MSG_EAGAIN if the operation simply needs to be tried again
+ *  - MSG_ECONN if the socket/pipe connection was broken
+ *  - MSG_ESERV if an internal error occurred (indicates bug)
+ */
+int message_error(int msg_errno) {
+   switch (msg_errno) {
+   case 0:
+      return MSG_ESUCCESS;
+      
+   case EAGAIN:
+#if EAGAIN != EWOULDBLOCK
+   case EWOULDBLOCK:
+#endif
+   case EINTR:
+      return MSG_EAGAIN;
+
+   case EPIPE:
+   case ECONNABORTED:
+   case ECONNREFUSED:
+   case ECONNRESET:
+      return MSG_ECONN;
+
+   default:
+      return MSG_ESERV;
+   }
+}
