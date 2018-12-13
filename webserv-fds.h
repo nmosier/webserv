@@ -4,10 +4,11 @@
 /* types */
 typedef struct {
    struct pollfd *fds;
-   httpmsg_t  *reqs;
-   httpmsg_t *resps;
-   size_t       len; // length of allocated array
-   size_t     count; // number of fds currently in array
+   httpmsg_t   *reqs;
+   httpmsg_t  *resps;
+   size_t        len; // length of allocated array
+   size_t      count; // number of fds currently in array
+   size_t      nopen; // number of fds that are open (count == nopen after httpfds_pack())
 } httpfds_t;
 
 /* prototypes */
