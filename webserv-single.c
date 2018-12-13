@@ -20,10 +20,11 @@ int handle_pollevents_client(int clientfd, int index, int revents, httpfds_t *hf
 int server_loop(int servfd) {
    httpfds_t hfds;
    int retv;
+   int shutdwn;
 
+   /* intialize variables */
    retv = 0;
-   
-   /* initialize client socket list */
+   shutdwn = 0;
    httpfds_init(&hfds);
    
    /* insert server socket to list */
@@ -35,22 +36,34 @@ int server_loop(int servfd) {
       return -1;
    }
 
-   /* service new connections & requests (infinite loop) */
-   while (retv >= 0) {
+   /* service clients as long as sockets open & fatal error hasn't occurred */
+   while (retv >= 0 && (server_accepting || hfds.nopen > 1)) {
       int nready;
 
-      if (DEBUG) {
-         fprintf(stderr, "polling...\n");
+      /* if no longer accepting, stop reading */
+      if (!server_accepting && !shutdwn) {
+         if (shutdown(servfd, SHUT_RD) < 0) {
+            perror("shutdown");
+            if (httpfds_delete(&hfds) < 0) {
+               perror("httpfds_delete");
+            }
+            return -1;
+         }
+         shutdwn = 1;
       }
       
+      /* poll for new connections / reading requests / sending responses */
       if ((nready = poll(hfds.fds, hfds.count, -1)) < 0) {
-         perror("poll");
-         if (httpfds_delete(&hfds) < 0) {
-            perror("httpfds_delete");
+         if (errno != EINTR) {
+            perror("poll");
+            if (httpfds_delete(&hfds) < 0) {
+               perror("httpfds_delete");
+            }
+            return -1;
          }
-         return -1;
+         continue;
       }
-
+   
       if (DEBUG) {
          fprintf(stderr, "poll: %d descriptors ready\n", nready);
       }
@@ -64,6 +77,10 @@ int server_loop(int servfd) {
          if (fd >= 0 && revents) {
             if (fd == servfd) {
                if (handle_pollevents_server(fd, revents, &hfds) < 0) {
+                  fprintf(stderr, "server_loop: server socket error\n");
+                  if (httpfds_delete(&hfds) < 0) {
+                     perror("httpfds_delete");
+                  }
                   return -1;
                }
             } else {
@@ -78,9 +95,11 @@ int server_loop(int servfd) {
       }
 
       /* pack httpfds in case some connections were closed */
-      httpfds_pack(&hfds); // never fails
+      httpfds_pack(&hfds);
    }
-   
+
+   /* remove (& close) all client sockets */
+   hfds.fds[0].fd = -1; // don't want to close server socket
    if (httpfds_delete(&hfds) < 0) {
       perror("httpfds_delete");
       retv = -1;
@@ -92,12 +111,7 @@ int server_loop(int servfd) {
 
 int handle_pollevents_server(int servfd, int revents, httpfds_t *hfds) {
    if (revents & POLLERR) {
-      /* server error */
-      fprintf(stderr, "server_loop: server socket error\n");
-      if (httpfds_delete(hfds) < 0) {
-         perror("httpfds_delete");
-      }
-      
+      /* server error */      
       return -1;
    } else if (revents & POLLIN) {
       int new_client_fd;
@@ -105,9 +119,6 @@ int handle_pollevents_server(int servfd, int revents, httpfds_t *hfds) {
       /* accept new connection */
       if ((new_client_fd = server_accept(servfd)) < 0) {
          perror("server_accept");
-         if (httpfds_delete(hfds) < 0) {
-            perror("httpfds_delete");
-         }
          return -1;
       }
       
