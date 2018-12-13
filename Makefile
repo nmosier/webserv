@@ -4,7 +4,6 @@ OFLAGS=-Wall -I$(LIBDIR) -pedantic -g -c -fPIC
 SOFLAGS=-shared
 LIBFLAGS=-L$(LIBDIR) -lwebserv
 
-
 OBJS_SINGLE=webserv-main.o webserv-single.o webserv-fds.o
 OBJS_MULTI=webserv-main.o webserv-multi.o
 
@@ -25,6 +24,14 @@ webserv-multi.o: webserv-multi.c
 
 %.o: %.c
 	gcc $(OFLAGS) -o $@ $^
+
+.PHONY: pid
+pid:
+	ps auxww | grep -e webserv-single -e webserv-multi | grep -v grep | tr -s ' ' | cut -d ' ' -f2
+
+.PHONY: kill
+kill:
+	ps auxww | grep -e webserv-single -e webserv-multi | grep -v grep | tr -s ' ' | cut -d ' ' -f2 | xargs kill
 
 .PHONY: clean
 clean:
