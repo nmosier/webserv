@@ -1,18 +1,25 @@
 #include <string.h>
 #include <stdio.h>
+#include <errno.h>
+#include <unistd.h>
+#include <ctype.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <sys/utsname.h>
 #include "webserv-lib.h"
 #include "webserv-util.h"
+#include "webserv-vec.h"
 #include "webserv-dbg.h"
 
-char *strstrip(char *str, char *strip) {
+char *strstrip(char *str, const char *strip) {
    while (*str && strchr(strip, *str)) {
       ++str;
    }
    return str;
 }
 
-char *strrstrip(char *str, char *strip) {
+char *strrstrip(char *str, const char *strip) {
    char *str_it;
    for (str_it = strchr(str, '\0'); str_it > str && strchr(strip, str[-1]); --str_it) {}
    *str_it = '\0';
@@ -76,6 +83,122 @@ int hm_fmtdate(const time_t *sec_ptr, char **time_str) {
 }
 
 
+
+int content_types_init(const char *tabpath, filetype_table_t *ftypes) {
+   int tabfd;
+   off_t tablen;
+   struct stat tabstat;
+   char *tab;
+   int retv, errsav;
+   filetype_t ftype;
+   
+   /* initialize vars */
+   tabfd = -1;
+   tab = NULL;
+   retv = -1;
+   VECTOR_INIT(ftypes);
+   
+   /* open type table file */
+   if ((tabfd = open(tabpath, O_RDONLY)) < 0) {
+      goto cleanup;
+   }
+
+   /* get length of type table */
+   if (fstat(tabfd, &tabstat) < 0) {
+      goto cleanup;
+   }
+   tablen = tabstat.st_size;
+
+   /* map types filedes into memory */
+   if ((tab = mmap(NULL, tablen, PROT_READ|PROT_WRITE, MAP_PRIVATE, tabfd, 0)) == NULL) {
+      goto cleanup;
+   }
+
+   /* tokenize file's contents and store into vector */
+   const char *name, *ext, *line;
+   char *line_last;
+   const char *line_term = "\n", *name_term = " ", *ext_term = "\0";
+
+
+   line = strstrip(strtok_r(tab, line_term, &line_last), line_term);
+   while (*line == '#') {
+      line = strstrip(strtok_r(NULL, line_term, &line_last), line_term);
+   }
+   while (isgraph(*line)) {
+      name = strtok(line, name_term);
+      ext = strstrip(strtok(NULL, ext_term), name_term);
+
+      
+      
+      do {
+         line = strstrip(strtok_r(NULL, line_term, &line_last), line_term);
+      } while (*line == '#');
+   }
+
+   
+   while (isgraph(*line)) {
+      name = 
+      ext = strstrip(strtok(NULL, ext_term), name_term); // skip all leading spaces
+      if (*name == '#') {
+         continue; // skip comment
+      }
+      if (!isgraph(*ext)) {
+         /* syntax error: */
+         errno = EINVAL;
+         goto cleanup;
+      }
+
+      /* insert duped (name, ext) pair into vector */
+      if ((ftype.name = strdup(name)) == NULL || (ftype.ext = strdup(ext)) == NULL) {
+         goto cleanup;
+      }
+      if (VECTOR_INSERT(&ftype, ftypes) < 0) {
+         goto cleanup;
+      }
+
+      /* get next name */
+      name = strstrip(strtok(NULL, name_term), ext_term);
+   }
+
+   /* sort table (by extension) */
+   VECTOR_QSORT(ftypes, content_types_cmp);
+
+   retv = 0; // success
+   
+   /* cleanup */
+ cleanup:
+   errsav = errno; // save error, if any
+   if (tab && munmap(tab, tablen) < 0) {
+      if (retv >= 0) {
+         errsav = errno;
+      }
+      retv = -1;
+   }
+   if (tabfd >= 0 && close(tabfd) < 0) {
+      if (retv >= 0){
+         errsav = errno;
+      }
+      retv = -1;
+   }
+   if (retv < 0) {
+      VECTOR_DELETE(ftypes, content_types_del); // always succeeds
+   }
+
+   errno = errsav;
+   return retv;
+}
+
+int content_types_cmp(const filetype_t *ft1, const filetype_t *ft2) {
+   return strcmp(ft1->ext, ft2->ext);
+}
+
+int content_types_del(filetype_t *ft) {
+   free(ft->name);
+   free(ft->ext);
+   return 0; // always succeeds
+}
+
+
 char *get_content_type(const char *path, char *type) {
    const char *filename;
    const char *extension;
@@ -131,3 +254,10 @@ const char *hr_meth2str(httpreq_method_t meth) {
    }
    return NULL;
 }
+
+
+
+
+
+
+

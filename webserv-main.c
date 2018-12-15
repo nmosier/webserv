@@ -5,6 +5,7 @@
 #include <signal.h>
 #include <sys/socket.h>
 #include "webserv-lib.h"
+#include "webserv-util.h"
 #include "webserv-dbg.h"
 #include "webserv-main.h"
 
@@ -13,8 +14,9 @@ int server_accepting = 0; // whether server is accepting new connections
 int main(int argc, char *argv[]) {
    int optc;
    int optinval;
-   const char *optstr = "p:";
+   const char *optstr = "p:t:";
    const char *port = PORT;
+   const char *types_path = CONTENT_TYPES_PATH;
    
    /* parse arguments */
    optinval = 0;
@@ -23,6 +25,8 @@ int main(int argc, char *argv[]) {
       case 'p':
          port = optarg;
          break;
+      case 't':
+         types_path = optarg;
       default:
          optinval = 1;
          break;
@@ -52,12 +56,19 @@ int main(int argc, char *argv[]) {
       perror("sigaction");
       exit(2);
    }
+
+   /* load content types table */
+   filetype_table_t typetab;
+   if (content_types_init(types_path, &typetab) < 0) {
+      perror("content_types_init");
+      exit(3);
+   }
    
    /* start web server */
    int servfd;
    if ((servfd = server_start(port, BACKLOG)) < 0) {
       fprintf(stderr, "%s: failed to start server; exiting.\n", argv[0]);
-      exit(3);
+      exit(4);
    }
    server_accepting = 1;
 
@@ -67,7 +78,7 @@ int main(int argc, char *argv[]) {
       if (close(servfd) < 0) {
          perror("close");
       }
-      exit(4);
+      exit(5);
    }
 
    if (close(servfd) < 0) {

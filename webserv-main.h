@@ -9,6 +9,7 @@ int server_accepting;
 #define SERVER_NAME "webserv-single/1.0"
 #define PORT "1024"
 #define BACKLOG 10
+#define CONTENT_TYPES_PATH "/etc/mime.types"
 
 /* prototypes */
 int server_loop(int servfd);

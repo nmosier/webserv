@@ -132,12 +132,12 @@ int message_error(int msg_errno) {
    case EWOULDBLOCK:
 #endif
    case EINTR:
+   case ECONNRESET:
       return MSG_EAGAIN;
 
    case EPIPE:
    case ECONNABORTED:
    case ECONNREFUSED:
-   case ECONNRESET:
       return MSG_ECONN;
 
    default:

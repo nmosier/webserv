@@ -1,4 +1,5 @@
-
+#ifndef __WEBSERV_LIB_H
+#define __WEBSERV_LIB_H
 
 /* HTTP request methods */
 typedef enum {
@@ -124,3 +125,5 @@ enum {
 #define C_FORBIDDEN_BODY "Forbidden"
 
 #define HM_HTTP_VERSION "1.1"
+
+#endif

@@ -2,6 +2,7 @@
 #include <malloc.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <stdio.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -12,6 +13,7 @@
 #include <netinet/in.h>
 #include "webserv-lib.h"
 #include "webserv-util.h"
+#include "webserv-vec.h"
 #include "webserv-dbg.h"
 #include "webserv-main.h"
 
@@ -26,7 +28,7 @@ struct client_thread_args {
 typedef struct {
    pthread_t *arr;
    size_t len;
-   size_t count;
+   size_t cnt;
 } pthreads_t;
 
 /* prototypes */
@@ -44,7 +46,7 @@ int server_loop(int servfd) {
 
    /* initialize variables */
    retv = 0;
-   pthreads_init(&thds);
+   VECTOR_INIT(&thds);
 
    /* accept new connections & spin off new threads */
    while (retv >= 0 && server_accepting) {
@@ -72,7 +74,7 @@ int server_loop(int servfd) {
       }
 
       /* add thread to list */
-      if (pthreads_insert(thd, &thds) < 0) {
+      if (VECTOR_INSERT(&thd, &thds) < 0) {
          perror("pthreads_insert");
          retv = -1;
          break;
@@ -88,7 +90,8 @@ int server_loop(int servfd) {
    }
 
    /* wait for threads to die */
-   for (size_t i = 0; i < thds.count; ++i) {
+   printf("waiting for %zu connections to close...\n", thds.cnt);
+   for (size_t i = 0; i < thds.cnt; ++i) {
       void *thd_retv;
 
       /* join thread */
@@ -100,7 +103,7 @@ int server_loop(int servfd) {
          retv = -1;
       }
    }
-   pthreads_delete(&thds);
+   VECTOR_DELETE(&thds, NULL);
 
    return retv;
 }
@@ -173,63 +176,34 @@ void *client_loop(void *args) {
    return retv;
 }
 
-
+/*
 void pthreads_init(pthreads_t *thds) {
-   memset(thds, 0, sizeof(pthreads_t));
+   vector_init(thds, sizeof(*thds));
 }
 
 int pthreads_resize(size_t newlen, pthreads_t *thds) {
-   pthread_t *newthds;
-   
-   if ((newthds = reallocarray(thds->arr, newlen, sizeof(pthread_t))) == NULL) {
-      return -1;
-   }
-
-   thds->arr = newthds;
-   thds->len = newlen;
-
-   return 0;
+   return vector_resize(newlen, (void **) &thds->arr, &thds->cnt, &thds->len,
+                        sizeof(*thds->arr));
 }
 
 size_t pthreads_rem(pthreads_t *thds) {
-   return thds->len - thds->count;
+   return vector_rem(thds->cnt, thds->len);
 }
 
 int pthreads_insert(pthread_t thd, pthreads_t *thds) {
-   if (pthreads_rem(thds) == 0) {
-      size_t newlen = smax(PTHREAD_MINLEN, thds->len * 2);
-      if (pthreads_resize(newlen, thds) < 0) {
-         return -1;
-      }
-   }
+   return vector_insert(&thd, (void **) &thds->arr, &thds->cnt, &thds->len, sizeof(*thds->arr));
+}
 
-   thds->arr[thds->count++] = thd;
-
-   return 0;
+int pthreads_compare(void *thd1, void *thd2) {
+   return *((pthread_t *) thd1) - *((pthread_t *) thd2);
 }
 
 int pthreads_remove(pthread_t thd, pthreads_t *thds) {
-   size_t i;
-   
-   /* find matching entry */
-   for (i = 0; i < thds->count && thds->arr[i] != thd; ++i) {}
-   if (i == thds->count) {
-      /* not found */
-      return 0; // removed 0 elts
-   }
-
-   /* update number of entries */
-   --thds->count;
-
-   /* replace entry at found index with last entry */
-   if (i != thds->count) {
-      thds->arr[i] = thds->arr[thds->count];
-   }
-
-   return 1; // removed 1 elt
+   return vector_remove(&thd, (void **) &thds->arr, &thds->cnt, sizeof(*thds->arr),
+                        pthreads_compare);
 }
 
 void pthreads_delete(pthreads_t *thds) {
-   free(thds->arr);
-   memset(thds, 0, sizeof(pthreads_t));
+   vector_delete(thds, (void **) &thds->arr, sizeof(*thds));
 }
+*/
