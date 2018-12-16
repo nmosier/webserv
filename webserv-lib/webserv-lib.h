@@ -1,6 +1,8 @@
 #ifndef __WEBSERV_LIB_H
 #define __WEBSERV_LIB_H
 
+#include "webserv-contype.h"
+
 /* HTTP request methods */
 typedef enum {
    M_NONE = 0,
@@ -59,9 +61,9 @@ typedef struct {
 int server_start(const char *port, int backlog);
 int server_accept(int servfd);
 int server_handle_req(int conn_fd, const char *docroot, const char *servname,
-                      httpmsg_t *req, httpmsg_t *res);
+                      httpmsg_t *req, httpmsg_t *res, const filetype_table_t *ftypes);
 int server_handle_get(int conn_fd, const char *docroot, const char *servname, httpmsg_t *req,
-                      httpmsg_t *res);
+                      httpmsg_t *res, const filetype_table_t *ftypes);
 
 size_t message_textfree(const httpmsg_t *msg);
 void message_init(httpmsg_t *msg);
@@ -83,7 +85,7 @@ void response_delete(httpmsg_t *res);
 int response_insert_line(int code, const char *version, httpmsg_t *res);
 int response_insert_header(const char *key, const char *val, httpmsg_t *res);
 int response_insert_body(const char *body, size_t bodylen, const char *type, httpmsg_t *res);
-int response_insert_file(const char *path, httpmsg_t *res);
+int response_insert_file(const char *path, httpmsg_t *res, const filetype_table_t *ftypes);
 int response_insert_genhdrs(httpmsg_t *res);
 int response_insert_servhdrs(const char *servname, httpmsg_t *res);
 httpres_stat_t *response_find_status(int code);
