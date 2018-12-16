@@ -50,7 +50,7 @@ int main(int argc, char *argv[]) {
       exit(2);
    }
    
-   /* install SIGPIPE handler (implementation-dependent) */
+   /* install SIGPIPE handler */
    sa.sa_handler = handler_sigpipe;
    if (sigaction(SIGPIPE, &sa, NULL) < 0) {
       perror("sigaction");
@@ -59,34 +59,42 @@ int main(int argc, char *argv[]) {
 
    /* load content types table */
    filetype_table_t typetab;
-   if (content_types_init(types_path, &typetab) < 0) {
+   if (content_types_load(types_path, &typetab) < 0) {
       perror("content_types_init");
       exit(3);
    }
+
+   /* save parsed & sorted content type table */
+   if (DEBUG) {
+      if (content_types_save("mime_sorted.types", &typetab) < 0) {
+         perror("content_types_save");
+         exit(4);
+      }
+   }
    
    /* start web server */
-   int servfd;
+   int servfd, exitno;
    if ((servfd = server_start(port, BACKLOG)) < 0) {
       fprintf(stderr, "%s: failed to start server; exiting.\n", argv[0]);
-      exit(4);
+      exit(5);
    }
    server_accepting = 1;
 
    /* run server loop */
-   if (server_loop(servfd) < 0) {
+   exitno = 0;
+   if (server_loop(servfd, &typetab) < 0) {
       fprintf(stderr, "%s: internal error occurred; exiting.\n", argv[0]);
-      if (close(servfd) < 0) {
-         perror("close");
-      }
-      exit(5);
+      exitno = 6;
    }
 
+   /* cleanup */
    if (close(servfd) < 0) {
       perror("close");
-      exit(6);
+      exitno = 7;
    }
+   content_types_delete(&typetab);
    
-   exit(0);
+   exit(exitno);
 }
 
 void handler_sigint(int signum) {

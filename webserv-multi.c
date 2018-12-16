@@ -15,6 +15,7 @@
 #include "webserv-util.h"
 #include "webserv-vec.h"
 #include "webserv-dbg.h"
+#include "webserv-contype.h"
 #include "webserv-main.h"
 
 /* macros */
@@ -23,63 +24,82 @@
 /* types */
 struct client_thread_args {
    int client_fd;
+   const filetype_table_t *ftypes;
 };
 
 typedef struct {
-   pthread_t *arr;
+   pthread_t thd;
+   struct client_thread_args *args; // malloc()ed
+} client_thread_info_t;
+
+typedef struct {
+   client_thread_info_t *arr;
    size_t len;
    size_t cnt;
-} pthreads_t;
+} client_threads_t;
 
 /* prototypes */
 void *client_loop(void *args);
-void pthreads_init(pthreads_t *thds);
-int pthreads_resize(size_t newlen, pthreads_t *thds);
-size_t pthreads_rem(pthreads_t *thds);
-int pthreads_insert(pthread_t thd, pthreads_t *thds);
-int pthreads_remove(pthread_t thd, pthreads_t *thds);
-void pthreads_delete(pthreads_t *thds);
+int client_thread_info_init(client_thread_info_t *thd_info);
+int client_thread_info_del(client_thread_info_t *thd_info);
 
-int server_loop(int servfd) {
+int server_loop(int servfd, const filetype_table_t *ftypes) {
    int retv;
-   pthreads_t thds;
-
+   client_threads_t thds;
+   
    /* initialize variables */
    retv = 0;
    VECTOR_INIT(&thds);
-
+   
    /* accept new connections & spin off new threads */
    while (retv >= 0 && server_accepting) {
       int client_fd;
-      pthread_t thd;
-      struct client_thread_args thd_args;
-
+      client_thread_info_t thd_info;
+      
       /* accept new connection */
       if ((client_fd = server_accept(servfd)) < 0) {
          if (errno != EINTR) {
             perror("server_accept");
             retv = -1;
             break;
+         } else {
+            continue; // restart loop in case of interrupt
          }
-         continue; // restart loop in case of interrupt
       }
       
+      /* initialize thread info */
+      if (client_thread_info_init(&thd_info) < 0) {
+         perror("client_thread_info_init");
+         if (close(client_fd) < 0) {
+            perror("close");
+         }
+         retv = -1;
+         break;
+      }
+      thd_info.args->client_fd = client_fd;
+      thd_info.args->ftypes = ftypes;
+      
       /* spin off new thread */
-      thd_args.client_fd = client_fd;
-      if (pthread_create(&thd, NULL, client_loop, &thd_args)) {
-         /* don't exit -- wait for other threads to die */
+      if (pthread_create(&thd_info.thd, NULL, client_loop, thd_info.args)) {
          perror("pthread_create");
+         if (close(client_fd) < 0) {
+            perror("close");
+         }
          retv = -1;
          break;
       }
 
-      /* add thread to list */
-      if (VECTOR_INSERT(&thd, &thds) < 0) {
+      /* add thread info to list */
+      if (VECTOR_INSERT(&thd_info, &thds) < 0) {
          perror("pthreads_insert");
+         if (close(client_fd) < 0) {
+            perror("close");
+         }
+         client_thread_info_del(&thd_info);
          retv = -1;
          break;
       }
-
+      
    }
 
    /* cleanup */
@@ -95,7 +115,7 @@ int server_loop(int servfd) {
       void *thd_retv;
 
       /* join thread */
-      if (pthread_join(thds.arr[i], &thd_retv) < 0) {
+      if (pthread_join(thds.arr[i].thd, &thd_retv) < 0) {
          retv = -1;
       }
       if (thd_retv == (void *) -1) {
@@ -103,7 +123,7 @@ int server_loop(int servfd) {
          retv = -1;
       }
    }
-   VECTOR_DELETE(&thds, NULL);
+   VECTOR_DELETE(&thds, client_thread_info_del);
 
    return retv;
 }
@@ -113,12 +133,14 @@ void *client_loop(void *args) {
    struct client_thread_args *thd_args;
    int client_fd;
    httpmsg_t req, res;
+   const filetype_table_t *ftypes;
    int msg_stat, msg_err;
    void *retv;
 
    /* initialize variables */
    thd_args = (struct client_thread_args *) args;
    client_fd = thd_args->client_fd;
+   ftypes = thd_args->ftypes;
    retv = (void *) 0;
    request_init(&req);
    response_init(&res);
@@ -146,8 +168,8 @@ void *client_loop(void *args) {
    }
    
    /* create response */
-   if (server_handle_req(client_fd, DOCUMENT_ROOT, SERVER_NAME, &req, &res) < 0) {
-      perror("server_handle_get");
+   if (server_handle_req(client_fd, DOCUMENT_ROOT, SERVER_NAME, &req, &res, ftypes) < 0) {
+      perror("server_handle_req");
       retv = (void *) -1;
       goto cleanup;
    }
@@ -176,34 +198,18 @@ void *client_loop(void *args) {
    return retv;
 }
 
-/*
-void pthreads_init(pthreads_t *thds) {
-   vector_init(thds, sizeof(*thds));
+int client_thread_info_init(client_thread_info_t *thd_info) {
+   if ((thd_info->args = malloc(sizeof(*thd_info->args))) == NULL) {
+      return -1;
+   }
+
+   return 0;
 }
 
-int pthreads_resize(size_t newlen, pthreads_t *thds) {
-   return vector_resize(newlen, (void **) &thds->arr, &thds->cnt, &thds->len,
-                        sizeof(*thds->arr));
-}
+int client_thread_info_del(client_thread_info_t *thd_info) {
+   if (thd_info) {
+      free(thd_info->args);
+   }
 
-size_t pthreads_rem(pthreads_t *thds) {
-   return vector_rem(thds->cnt, thds->len);
+   return 0;
 }
-
-int pthreads_insert(pthread_t thd, pthreads_t *thds) {
-   return vector_insert(&thd, (void **) &thds->arr, &thds->cnt, &thds->len, sizeof(*thds->arr));
-}
-
-int pthreads_compare(void *thd1, void *thd2) {
-   return *((pthread_t *) thd1) - *((pthread_t *) thd2);
-}
-
-int pthreads_remove(pthread_t thd, pthreads_t *thds) {
-   return vector_remove(&thd, (void **) &thds->arr, &thds->cnt, sizeof(*thds->arr),
-                        pthreads_compare);
-}
-
-void pthreads_delete(pthreads_t *thds) {
-   vector_delete(thds, (void **) &thds->arr, sizeof(*thds));
-}
-*/

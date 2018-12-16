@@ -12,7 +12,7 @@ int server_accepting;
 #define CONTENT_TYPES_PATH "/etc/mime.types"
 
 /* prototypes */
-int server_loop(int servfd);
+int server_loop(int servfd, const filetype_table_t *ftypes);
 void handler_sigint(int signum);
 void handler_sigpipe(int signum);
 

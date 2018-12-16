@@ -15,9 +15,10 @@
 #include "webserv-main.h"
 
 int handle_pollevents_server(int servfd, int revents, httpfds_t *hfds);
-int handle_pollevents_client(int clientfd, int index, int revents, httpfds_t *hfds);
+int handle_pollevents_client(int clientfd, int index, int revents, httpfds_t *hfds,
+                             const filetype_table_t *ftypes);
 
-int server_loop(int servfd) {
+int server_loop(int servfd, const filetype_table_t *ftypes) {
    httpfds_t hfds;
    int retv;
    int shutdwn;
@@ -84,7 +85,7 @@ int server_loop(int servfd) {
                   return -1;
                }
             } else {
-               if (handle_pollevents_client(fd, i, revents, &hfds) < 0) {
+               if (handle_pollevents_client(fd, i, revents, &hfds, ftypes) < 0) {
                   return -1;
                }
             }
@@ -133,7 +134,8 @@ int handle_pollevents_server(int servfd, int revents, httpfds_t *hfds) {
 }
 
 
-int handle_pollevents_client(int clientfd, int index, int revents, httpfds_t *hfds) {
+int handle_pollevents_client(int clientfd, int index, int revents, httpfds_t *hfds,
+                             const filetype_table_t *ftypes) {
    int retv = 0;
 
    if (revents & POLLERR) {
@@ -176,7 +178,7 @@ int handle_pollevents_client(int clientfd, int index, int revents, httpfds_t *hf
          } else {
             /* successfully parse request */
             /* create response for request */
-            if (server_handle_req(clientfd, DOCUMENT_ROOT, SERVER_NAME, reqp, resp) < 0) {
+            if (server_handle_req(clientfd, DOCUMENT_ROOT, SERVER_NAME, reqp, resp, ftypes) < 0) {
                perror("server_handle_req");
                retv = -1;
             }
