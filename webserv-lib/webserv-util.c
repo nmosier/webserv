@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
@@ -10,15 +11,32 @@
 #include "webserv-lib.h"
 #include "webserv-util.h"
 #include "webserv-vec.h"
+#include "webserv-contype.h"
 #include "webserv-dbg.h"
 
+/* strstrip()
+ * DESC: strip any leading characters of _str_ that occur in _strip_
+ * ARGS:
+ *  - str: string to "strip" the leading characters off of
+ *  - strip: list of characters to strip
+ * RETV: returns pointer to first character in _str_ that does not occur in _strip_
+ * EXAMPLE: strstrip("abbaccc", "ab") -> "ccc"
+ */
 char *strstrip(char *str, const char *strip) {
-   while (*str && strchr(strip, *str)) {
+   while (*str != '\0' && strchr(strip, *str)) {
       ++str;
    }
    return str;
 }
 
+/* strrstrip() 
+ * DESC: strip any trailing characters of _str_ that occur in _strip_
+ *       (note: modifies _str_ by writing '\0' at end of stripped result)
+ * ARGS:
+ *  - str: string to "strip" the trailing characters off of
+ *  - strip: list of characters to strip
+ * RETV: returns _str_
+ */
 char *strrstrip(char *str, const char *strip) {
    char *str_it;
    for (str_it = strchr(str, '\0'); str_it > str && strchr(strip, str[-1]); --str_it) {}
@@ -50,19 +68,32 @@ char *strskip(const char *s1, char *s2) {
    return strprefix(s1, s2) ? s2 + strlen(s1) : NULL;
 }
 
-
+/* tm_wday2str()
+ * DESC: converts _wday_ to string (weekday abbreviation)
+ */
 const char *tm_wday2str(int wday) {
    const char *wdays[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
    return wdays[wday];
 }
 
+/* tm_mon2str()
+ * DESC: converts _mon_ to string (month abbreviation 
+ */
 const char *tm_mon2str(int mon) {
    const char *mons[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
                          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
    return mons[mon];
 }
 
-// formats date for HTTP
+/* hm_fmtdate()
+ * DESC: formats date in HTTP date format given time in seconds, _sec_ptr_.
+ * ARGS:
+ *  - sec_ptr: pointer to time_t value to format.
+ *  - time_str: pointer to where the dynamically-allocated formatted string should be placed.
+ * RETV: returns 0 upon success; returns -1 upon error. Upon error, no string is allocated.
+ * NOTE: Since this function dynamically allocates a string on success, the programmer must 
+ *       delete it after use.
+ */
 int hm_fmtdate(const time_t *sec_ptr, char **time_str) {
    struct tm *time_info;
    
@@ -82,150 +113,28 @@ int hm_fmtdate(const time_t *sec_ptr, char **time_str) {
    return 0;
 }
 
-
-
-int content_types_init(const char *tabpath, filetype_table_t *ftypes) {
-   int tabfd;
-   off_t tablen;
-   struct stat tabstat;
-   char *tab;
-   int retv, errsav;
-   filetype_t ftype;
-   
-   /* initialize vars */
-   tabfd = -1;
-   tab = NULL;
-   retv = -1;
-   VECTOR_INIT(ftypes);
-   
-   /* open type table file */
-   if ((tabfd = open(tabpath, O_RDONLY)) < 0) {
-      goto cleanup;
-   }
-
-   /* get length of type table */
-   if (fstat(tabfd, &tabstat) < 0) {
-      goto cleanup;
-   }
-   tablen = tabstat.st_size;
-
-   /* map types filedes into memory */
-   if ((tab = mmap(NULL, tablen, PROT_READ|PROT_WRITE, MAP_PRIVATE, tabfd, 0)) == NULL) {
-      goto cleanup;
-   }
-
-   /* tokenize file's contents and store into vector */
-   const char *name, *ext, *line;
-   char *line_last;
-   const char *line_term = "\n", *name_term = " ", *ext_term = "\0";
-
-
-   line = strstrip(strtok_r(tab, line_term, &line_last), line_term);
-   while (*line == '#') {
-      line = strstrip(strtok_r(NULL, line_term, &line_last), line_term);
-   }
-   while (isgraph(*line)) {
-      name = strtok(line, name_term);
-      ext = strstrip(strtok(NULL, ext_term), name_term);
-
-      
-      
-      do {
-         line = strstrip(strtok_r(NULL, line_term, &line_last), line_term);
-      } while (*line == '#');
-   }
-
-   
-   while (isgraph(*line)) {
-      name = 
-      ext = strstrip(strtok(NULL, ext_term), name_term); // skip all leading spaces
-      if (*name == '#') {
-         continue; // skip comment
-      }
-      if (!isgraph(*ext)) {
-         /* syntax error: */
-         errno = EINVAL;
-         goto cleanup;
-      }
-
-      /* insert duped (name, ext) pair into vector */
-      if ((ftype.name = strdup(name)) == NULL || (ftype.ext = strdup(ext)) == NULL) {
-         goto cleanup;
-      }
-      if (VECTOR_INSERT(&ftype, ftypes) < 0) {
-         goto cleanup;
-      }
-
-      /* get next name */
-      name = strstrip(strtok(NULL, name_term), ext_term);
-   }
-
-   /* sort table (by extension) */
-   VECTOR_QSORT(ftypes, content_types_cmp);
-
-   retv = 0; // success
-   
-   /* cleanup */
- cleanup:
-   errsav = errno; // save error, if any
-   if (tab && munmap(tab, tablen) < 0) {
-      if (retv >= 0) {
-         errsav = errno;
-      }
-      retv = -1;
-   }
-   if (tabfd >= 0 && close(tabfd) < 0) {
-      if (retv >= 0){
-         errsav = errno;
-      }
-      retv = -1;
-   }
-   if (retv < 0) {
-      VECTOR_DELETE(ftypes, content_types_del); // always succeeds
-   }
-
-   errno = errsav;
-   return retv;
-}
-
-int content_types_cmp(const filetype_t *ft1, const filetype_t *ft2) {
-   return strcmp(ft1->ext, ft2->ext);
-}
-
-int content_types_del(filetype_t *ft) {
-   free(ft->name);
-   free(ft->ext);
-   return 0; // always succeeds
-}
-
-
-char *get_content_type(const char *path, char *type) {
-   const char *filename;
-   const char *extension;
-
-   if ((filename = strrchr(path, '/')) == NULL) {
-      filename = path;
-   }
-
-   if ((extension = strrchr(path, '.')) == NULL) {
-      extension = CONTENT_TYPE_PLAIN;
-   }
-
-   return strcpy(type, extension);
-}
-
-
+/* smax()
+ * DESC: return the maximum of two size_t values.
+ */
 size_t smax(size_t s1, size_t s2) {
    return (s1 < s2) ? s2 : s1;
 }
 
+/* smin()
+ * DESC: return the maximum of two size_t values.
+ */
 size_t smin(size_t s1, size_t s2) {
    return (s1 < s2) ? s1 : s2;
 }
 
-
-
-
+/* hr_str2meth()
+ * DESC: converts HTTP method string _str_ to enum type httpreq_method_t (values are M_*).
+ * ARGS:
+ *  - str: HTTP method string to convert.
+ * RETV: returns method's enum representation (M_*) upon success, -1 upon error.
+ * ERRS:
+ *  - EINVAL: _str_ does not represent a valid HTTP mode or is not supported.
+ */
 typedef struct {
    const char *str;
    httpreq_method_t meth;
@@ -236,16 +145,24 @@ static hr_str2meth_t hr_str2meth_v[] = {
    {0,            0}
 };
 
-
 httpreq_method_t hr_str2meth(const char *str) {
    for (hr_str2meth_t *it = hr_str2meth_v; it->str; ++it) {
       if (strcmp(it->str, str) == 0) {
          return it->meth;
       }
    }
+   errno = EINVAL;
    return -1;
 }
 
+/* hr_str2meth()
+ * DESC: converts HTTP method enum value (M_*) to string representation.
+ * ARGS:
+ *  - meth: HTTP method in enum (M_*) representation.
+ * RETV: returns string representation on success, NULL on error;
+ * ERRS:
+ *  - EINVAL: _meth_ does not represent a valid HTTP mode or is not supported.
+ */
 const char *hr_meth2str(httpreq_method_t meth) {
    for (hr_str2meth_t *it = hr_str2meth_v; it->str; ++it) {
       if (meth == it->meth) {
