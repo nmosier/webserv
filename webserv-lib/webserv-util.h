@@ -14,16 +14,6 @@
                                   -1)
 
 
-typedef struct {
-   char *name;
-   char *ext;
-} filetype_t;
-
-typedef struct {
-   filetype_t *arr;
-   size_t len;
-   size_t cnt;
-} filetype_table_t;
 
 
 
@@ -52,15 +42,5 @@ size_t smax(size_t s1, size_t s2);
 
 httpreq_method_t hr_str2meth(const char *str);
 const char *hr_meth2str(httpreq_method_t meth);
-
-int content_types_init(const char *tabpath, filetype_table_t *ftypes);
-int content_types_cmp(const filetype_t *ft1, const filetype_t *ft2);
-int content_types_del(filetype_t *ft);
-
-
-#define CONTENT_TYPE_MAXLEN 128
-#define CONTENT_TYPE_PLAIN  "text/plain"
-char *get_content_type(const char *path, char *type);
-
 
 #endif

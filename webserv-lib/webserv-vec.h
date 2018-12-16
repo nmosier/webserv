@@ -22,7 +22,7 @@
 void vector_init(void *vec, size_t vsize);
 int vector_resize(size_t newlen, void **oldarr, size_t *oldcnt, size_t *oldlen, size_t esize);
 size_t vector_rem(size_t cnt, size_t len);
-int vector_insert(void *elt, void **arr, size_t *cnt, size_t *len, size_t esize);
+ssize_t vector_insert(void *elt, void **arr, size_t *cnt, size_t *len, size_t esize);
 int vector_remove(size_t i, void **arr, size_t *cnt, size_t esize, int (*del)(void *));
 int vector_delete(void *vec, void **arr, size_t *cnt, size_t vsize, size_t esize,
                   int (*del)(void *));

@@ -235,6 +235,10 @@ int response_format(httpmsg_t *res) {
    /* update response fields */
    res->hm_text_ptr = res->hm_text;
    res->hm_text_size = msg_len;
+
+   if (DEBUG) {
+      fprintf(stderr, "formatted response (showing headers only):\n%s", hdrs_str);
+   }
    
    free(hdrs_str);
    
@@ -268,13 +272,13 @@ int response_send(int conn_fd, httpmsg_t *res) {
 }
 
 
-int response_insert_file(const char *path, httpmsg_t *res) {
+int response_insert_file(const char *path, httpmsg_t *res, const filetype_table_t *ftypes) {
    int fd;
    struct stat fd_info;
    off_t fd_size;
    char *last_mod;
    char *body;
-   char content_type[CONTENT_TYPE_MAXLEN];
+   const char *content_type;
    int retv;
 
    /* initialize variables (checked at cleanup) */
@@ -300,7 +304,7 @@ int response_insert_file(const char *path, httpmsg_t *res) {
    }
 
    /* insert into response as body */
-   get_content_type(path, content_type);
+   content_type = content_type_get(path, ftypes);
    if (response_insert_body(body, fd_size, content_type, res) < 0) {
       goto cleanup;
    }

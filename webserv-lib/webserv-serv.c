@@ -93,10 +93,10 @@ int server_accept(int servfd) {
 
 // returns response
 int server_handle_req(int conn_fd, const char *docroot, const char *servname,
-                      httpmsg_t *req, httpmsg_t *res) {
+                      httpmsg_t *req, httpmsg_t *res, const filetype_table_t *ftypes) {
    switch (req->hm_line.reql.method) {
    case M_GET:
-      return server_handle_get(conn_fd, docroot, servname, req, res);
+      return server_handle_get(conn_fd, docroot, servname, req, res, ftypes);
    default:
       errno = EBADRQC;
       return -1;
@@ -107,7 +107,7 @@ int server_handle_req(int conn_fd, const char *docroot, const char *servname,
 // handle GET request
 // TODO: make case statement table-driven, not switch case
 int server_handle_get(int conn_fd, const char *docroot, const char *servname, httpmsg_t *req,
-                      httpmsg_t *res) {
+                      httpmsg_t *res, const filetype_table_t *ftypes) {
    char *path;
    int code;
 
@@ -122,7 +122,7 @@ int server_handle_get(int conn_fd, const char *docroot, const char *servname, ht
       
    /* insert file */
    if (code == C_OK) {
-      if (response_insert_file(path, res) < 0) {
+      if (response_insert_file(path, res, ftypes) < 0) {
          response_delete(res);
          free(path);
          return -1;
