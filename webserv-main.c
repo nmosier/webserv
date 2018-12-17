@@ -11,6 +11,10 @@
 
 int server_accepting = 0; // whether server is accepting new connections
 
+/* main()
+ * NOTE: this main method is shared between webserv-multi and webserv-single. main() performs setup &
+ *       cleanup and calls server_loop(), which is implementation-specific.
+ */
 int main(int argc, char *argv[]) {
    int optc;
    int optinval;
@@ -97,12 +101,22 @@ int main(int argc, char *argv[]) {
    exit(exitno);
 }
 
+/* handler_sigint()
+ * DESC: catches the SIGINT signal and tells the server to stop accepting new connections.
+ */
 void handler_sigint(int signum) {
    /* stop accepting new connections */
    printf("webserv-single: closing server to new connections...\n");
    server_accepting = 0;
 }
 
+/* handler_sigpipe()
+ * DESC: catches the SIGPIPE signal. Normally, a write to a broken pipe or socket triggers this,
+ *       terminating the program. Catching this and doing nothing allows the multithreaded web 
+ *       server to handle it within the main code body.
+ * NOTE: webserv-single should never receive this signal, since it uses poll(2) to determine if
+ *       any file descriptor errors occurred.
+ */
 void handler_sigpipe(int signum) {
    /* catch SIGPIPE & do nothing so that send(2) will fail with
     * EPIPE in the corresponding thread */

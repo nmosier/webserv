@@ -39,10 +39,18 @@ typedef struct {
 } client_threads_t;
 
 /* prototypes */
-void *client_loop(void *args);
+void *client_loop(struct client_thread_args *thd_args);
 int client_thread_info_init(client_thread_info_t *thd_info);
 int client_thread_info_del(client_thread_info_t *thd_info);
 
+/* server_loop()
+ * DESC: accepts & responds to new connections by creating new threads.
+ * ARGS:
+ *  - servfd: server socket (already set to listening).
+ *  - ftypes: pointer to content type table.
+ * RETV: returns 0 on success, -1 on error.
+ * NOTE: prints errors.
+ */
 int server_loop(int servfd, const filetype_table_t *ftypes) {
    int retv;
    client_threads_t thds;
@@ -80,7 +88,7 @@ int server_loop(int servfd, const filetype_table_t *ftypes) {
       thd_info.args->ftypes = ftypes;
       
       /* spin off new thread */
-      if (pthread_create(&thd_info.thd, NULL, client_loop, thd_info.args)) {
+      if (pthread_create(&thd_info.thd, NULL, (void *(*)(void *)) client_loop, thd_info.args)) {
          perror("pthread_create");
          if (close(client_fd) < 0) {
             perror("close");
@@ -129,8 +137,14 @@ int server_loop(int servfd, const filetype_table_t *ftypes) {
 }
 
 
-void *client_loop(void *args) {
-   struct client_thread_args *thd_args;
+/* client_loop()
+ * DESC: reads request from client socket, sends response, closes client socket, and dies.
+ * ARGS:
+ *  - thd_args: pointer to client socket thread's arguments, which contains a pointer
+ *              to a content type table and the client socket's file descriptor.
+ * RETV: returns (void *) 0 upon success, (void *) -1 upon error.
+ */
+void *client_loop(struct client_thread_args *thd_args) {
    int client_fd;
    httpmsg_t req, res;
    const filetype_table_t *ftypes;
@@ -138,7 +152,6 @@ void *client_loop(void *args) {
    void *retv;
 
    /* initialize variables */
-   thd_args = (struct client_thread_args *) args;
    client_fd = thd_args->client_fd;
    ftypes = thd_args->ftypes;
    retv = (void *) 0;
@@ -198,6 +211,10 @@ void *client_loop(void *args) {
    return retv;
 }
 
+/* client_thread_info_init()
+ * DESC: initializes a client thread info record.
+ * RETV: 0 upon success, -1 upon error.
+ */
 int client_thread_info_init(client_thread_info_t *thd_info) {
    if ((thd_info->args = malloc(sizeof(*thd_info->args))) == NULL) {
       return -1;
@@ -206,6 +223,10 @@ int client_thread_info_init(client_thread_info_t *thd_info) {
    return 0;
 }
 
+/* client_thread_info_del()
+ * DESC: deletes a client thread info record.
+ * RETV: 0.
+ */
 int client_thread_info_del(client_thread_info_t *thd_info) {
    if (thd_info) {
       free(thd_info->args);

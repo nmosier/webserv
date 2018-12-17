@@ -18,6 +18,17 @@ int handle_pollevents_server(int servfd, int revents, httpfds_t *hfds);
 int handle_pollevents_client(int clientfd, int index, int revents, httpfds_t *hfds,
                              const filetype_table_t *ftypes);
 
+
+/* server_loop()
+ * DESC: repeatedly poll(2)'s server socket for new connections to accept and client sockets
+ *       for (i) more request data to receive and then (ii) more response data to send. Returns
+ *       once server_accepting is 0 and all requests have been serviced.
+ * ARGS:
+ *  - servfd: server socket file descriptor.
+ *  - ftypes: pointer to content type table.
+ * RETV: 0 upon success, -1 upon error.
+ * NOTE: prints errors.
+ */
 int server_loop(int servfd, const filetype_table_t *ftypes) {
    httpfds_t hfds;
    int retv;
@@ -110,9 +121,32 @@ int server_loop(int servfd, const filetype_table_t *ftypes) {
 }
 
 
+/* handle_pollevents_server() 
+ * DESC: handles any events reported by poll(2) of the server socket.
+ * ARGS:
+ *  - servfd: server socket.
+ *  - revents: the _revents_ field filled out by poll(2) for the server socket.
+ *  - hfds: pointer to HTTP file descriptors record.
+ * RETV: 0 upon success, -1 upon error.
+ * ERRS:
+ *  - getsockopt(2): if error occurred in server socket.
+ *  - server_accept()
+ *  - httpfds_insert()
+ */
 int handle_pollevents_server(int servfd, int revents, httpfds_t *hfds) {
    if (revents & POLLERR) {
-      /* server error */      
+      int sockerr;
+      socklen_t errlen;
+
+      /* get error number from getsockopt(2) */
+      errlen = sizeof(sockerr);
+      if (getsockopt(servfd, SOL_SOCKET, SO_ERROR, (void *) &sockerr, &errlen) < 0) {
+         perror("getsockopt");
+      } else {
+         errno = sockerr;
+         perror("handle_pollevents_server");
+      }
+      
       return -1;
    } else if (revents & POLLIN) {
       int new_client_fd;
@@ -133,11 +167,21 @@ int handle_pollevents_server(int servfd, int revents, httpfds_t *hfds) {
    return 0;
 }
 
-
+/* handle_pollevents_client()
+ * DESC: handles any events reported by poll(2) on a client socket.
+ * ARGS:
+ *  - clientfd: client socket file descriptor.
+ *  - index: index of client socket in HTTP file descriptor array.
+ *  - revents: mask set by poll(2).
+ *  - hfds: pointer to HTTP file descriptor record.
+ *  - ftypes: pointer to content type table.
+ * RETV: 0 upon success, -1 upon error.
+ */
 int handle_pollevents_client(int clientfd, int index, int revents, httpfds_t *hfds,
                              const filetype_table_t *ftypes) {
-   int retv = 0;
+   int retv;
 
+   retv = 0;
    if (revents & POLLERR) {
       /* close client socket & mark as closed */
       if (httpfds_remove(index, hfds) < 0) {
