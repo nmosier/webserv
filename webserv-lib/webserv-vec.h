@@ -1,7 +1,15 @@
 #ifndef __WEBSERV_VEC_H
 #define __WEBSERV_VEC_H
 
+
+
 /* macros */
+/* VECTOR WRAPPER MACROS 
+ * These can only be used with a struct with the following members:
+ *  - arr: holds the array of elements.
+ *  - cnt: count of elements in array.
+ *  - len: total allocated capacity of array.
+ */
 #define VECTOR_MINLEN 16
 
 #define VECTOR_INIT(vec)             vector_init(vec, sizeof(*(vec)))
