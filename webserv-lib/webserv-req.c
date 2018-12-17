@@ -16,11 +16,24 @@
 #include "webserv-util.h"
 #include "webserv-dbg.h"
 
-/*************** HTTP REQUEST FUNCTIONS ***************/
+
+/* request_init(): initialize request. */
 void request_init(httpmsg_t *req) {
    message_init(req);
 }
 
+/* request_read()
+ * DESC: receive request (NONBLOCKING/ASYNCHRONOUS).
+ * ARGS:
+ *  - conn_fd: client socket.
+ *  - req: request being received.
+ * RETV: returns 0 once the entire request has been read, or
+ *       returns -1 if an error occurred OR reading would block.
+ * NOTE:
+ *  - prints errors.
+ *  - request_read() will likely need to be called multiple
+ *    times on the same request _req_ 
+ */
 int request_read(int conn_fd, httpmsg_t *req) {
    ssize_t bytes_received;
    size_t bytes_free, newsize;
@@ -56,12 +69,19 @@ int request_read(int conn_fd, httpmsg_t *req) {
    return 0; // success; request fully received
 }
 
-/* ERRORS:
+/* request_parse()
+ * DESC: parses request that has been fully reeceived (using request_read()). Parsed info
+ *       is stored internally in _req_.
+ * ARGS:
+ *  - req: request to parse.
+ * ERRS:
  *  - EBADMSG: request syntax error (not a valid request)
+ *  - see strdup(3)
+ *  - see message_resize_headers()
  */
+int request_parse_headers(httpmsg_t *req, char **saveptr_text);
 int request_parse(httpmsg_t *req) {
    char *saveptr_text;
-   ////////// PARSE REQUEST LINE /////////
    char *req_line, *req_method_str, *req_version_str, *req_uri_str;
    req_line = strtok_r(req->hm_text, "\n", &saveptr_text); // has trailing '\r'
 
@@ -84,7 +104,6 @@ int request_parse(httpmsg_t *req) {
       return -1;
    }
       
-
    /* parse request line HTTP version */
    req_version_str = strtok(NULL, "\r"); // last item in line
    req_version_str = strskip(HM_VERSION_PREFIX, req_version_str);
@@ -96,14 +115,22 @@ int request_parse(httpmsg_t *req) {
       return -1;
    }
    
-   ///////// PARSE REQUEST HEADERS /////////
+   /* parse request headers */
+   if (request_parse_headers(req, &saveptr_text) < 0) {
+      return -1;
+   }
+   
+   return 0;
+}
+
+int request_parse_headers(httpmsg_t *req, char **saveptr_text) {
    httpmsg_header_t *header_it;
    char *header_str, *val_str, *key_str;
    for (header_it = req->hm_headers;
-        (header_str = strtok_r(NULL, "\n", &saveptr_text))
+        (header_str = strtok_r(NULL, "\n", saveptr_text))
            && strcmp(header_str, "\r");
         ++header_it) {
-
+      
       /* check if array full */
       if (header_it == req->hm_headers + req->hm_nheaders) {
          size_t header_i = header_it - req->hm_headers; // current index
@@ -142,10 +169,11 @@ int request_parse(httpmsg_t *req) {
    }
 
    req->hm_headers_endp = header_it;
-   
+
    return 0;
 }
 
+/* request_delete(): delete request. */
 void request_delete(httpmsg_t *req) {
    /* delete message members */
    message_delete(req);
@@ -160,9 +188,18 @@ void request_delete(httpmsg_t *req) {
    memset(req, 0, sizeof(httpmsg_t));
 }
 
-// finds document
-// returns response code & completes path
-// NOTE: pathp ONLY malloc()ed if retval is C_OK
+/* request_document_find()
+ * DESC: try to find the resource requested in _req_.
+ * ARGS:
+ *  - docroot: the root directory in which to look for the resource.
+ *  - pathp: pointer to path string in which the full path will be returned.
+ *  - req: request.
+ * RETV: returns the HTTP response status code (C_*) for the request upon success,
+ *       -1 on error.
+ * NOTE:
+ *  - only upon return value C_OK is the path allocated and stored at *pathp.
+ *    In this case, *pathp must be freed after use. Otherwise, *pathp is undefined.
+ */
 int request_document_find(const char *docroot, char **pathp, httpmsg_t *req) {
    const char *rsrc;
    struct stat rsrc_stat;
