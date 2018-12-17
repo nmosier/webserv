@@ -8,15 +8,39 @@ There are multiple parts to the source code:
                     accepting connections, reading in requests, sending responses, etc. All sending and
                     receiving is asynchronous. The source code for this library is contained in the folder
                     "webserv-lib". It has its own Makefile, which builds the shared object library
-                    libwebserv.so. 
+                    libwebserv.so. The library's main header is "webserv-lib.h".
+      * webserv-main.[ch]: the shared main function for the single- and multi-threaded webservers. It performs
+                    initial setup and then calls server_loop(), which is implemented elsewhere.
+      * webserv-multi.c: the multi-threaded webserver. It implements server_loop(), called by main(), among
+                    other helper functions.
+      * webserv-single.c & webserv-fds.c: the single-threaded webserver. It implements server_loop().
 
+Both webservers provide the required basic features and the following additional features:
+ - MIME type.
+ - Graceful shutdown.
+
+USAGE:
+Both webservers have the same command-line invocation (since they share the same main() function).
+     usage: [./webserv-single | ./webserv-multi] [-p PORT] [-t TYPES]
+The command line options are:
+    -p : port number. Default is 1234.
+    -t : path to types file. Default is /etc/mime.types.
 
 QUESTIONS:
- * Would it make sense to dedicate a second thread in the "single-threaded" server to listen for new connections?
+ * I'm not sure whether I like or dislike the VECTOR_* API in webserv-lib/webserv-vec.[ch]. Macros
+   seemed necessary for usage of the vector_* family of functions not to be grotesquely verbose.
+ * smprintf(), macro defined in webserv-lib/webserv-util.h -- first of all, it seemed impossible
+   to write this as a proper function (without re-implementing printf() to count the number of
+   arguments to expect). Secondly, is using a function like this bad practice? It is far more
+   convenient than guessing or calculating how long a formatted string ought to be, but I find it
+   pecuiliar that there is no equivalent to smprintf() in glibc (the closest is snprintf(3)).
+
+KNOWN BUGS: none, but this hasn't been extensively tested.
 
 FUTURE WORK:
  * (multithreaded version) Have client-serving threads remove themselves from
     the pthread list after exiting (would need to use a mutex to lock the pthread list).
+ * Implement the remaining "Hard Mode" features.
 
 RESOURCES:
  * https://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html
