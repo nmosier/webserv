@@ -12,9 +12,9 @@
 #include <time.h>
 #include <fcntl.h>
 #include <sys/utsname.h>
-#include "webserv-lib.h"
 #include "webserv-util.h"
 #include "webserv-dbg.h"
+#include "webserv-msg.h"
 
 /* message_textfree() 
  * DESC: returns number of unused bytes in the text buffer of _msg_.

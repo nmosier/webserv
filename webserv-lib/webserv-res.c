@@ -12,9 +12,9 @@
 #include <time.h>
 #include <fcntl.h>
 #include <sys/utsname.h>
-#include "webserv-lib.h"
 #include "webserv-util.h"
 #include "webserv-dbg.h"
+#include "webserv-res.h"
 
 /* response_init(): initialize response. */
 void response_init(httpmsg_t *res) {

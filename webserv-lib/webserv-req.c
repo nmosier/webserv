@@ -12,9 +12,10 @@
 #include <time.h>
 #include <fcntl.h>
 #include <sys/utsname.h>
-#include "webserv-lib.h"
 #include "webserv-util.h"
 #include "webserv-dbg.h"
+#include "webserv-res.h"
+#include "webserv-req.h"
 
 
 /* request_init(): initialize request. */

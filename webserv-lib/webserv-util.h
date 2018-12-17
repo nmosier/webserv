@@ -1,19 +1,25 @@
 #ifndef  __WEBSERV_UTIL_H
 #define __WEBSERV_UTIL_H
 
-#include <string.h>
-#include <stdlib.h>
-#include <limits.h>
-#include <unistd.h>
-#include <time.h>
-#include "webserv-lib.h"
+#include <stdio.h>
+#include "webserv-msg.h"
 
+
+/* smprintf(char **sptr, const char *fmt, ...) -- s(tring)m(alloc)printf(ormat)
+ * DESC: formats string like sprintf(3), except it formats the string in an allocated buffer
+ *       of sufficient size and stores the pointer to this string in the first argument, _sptr_.
+ * ARGS:
+ *  - sptr: string pointer in which to store pointer to formatted string.
+ *  - fmt: format string (see sprintf(3))
+ *  - ...: see (sprintf(3))
+ * RETV: 0 on success, -1 on error.
+ * NOTE: a string is only allocated on success (and thus must be freed by the programmer).
+ *       If an error occurs, no string is allocated.
+ */
 #define smprintf(sptr, fmt, ...) ((*sptr = malloc(snprintf(NULL, 0, fmt, __VA_ARGS__) + 1)) ? \
                                   ((sprintf(*sptr, fmt, __VA_ARGS__) < 0) ? \
                                    (free(*sptr), -1) : 0) :             \
                                   -1)
-
-
 
 
 

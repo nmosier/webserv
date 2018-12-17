@@ -12,9 +12,12 @@
 #include <time.h>
 #include <fcntl.h>
 #include <sys/utsname.h>
-#include "webserv-lib.h"
+//#include "webserv-lib.h"
 #include "webserv-util.h"
 #include "webserv-dbg.h"
+#include "webserv-serv.h"
+#include "webserv-req.h"
+#include "webserv-res.h"
 
 /* server_start()
  * DESC: start the web server on port _port_ with backlog _backlog_.

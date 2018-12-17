@@ -8,10 +8,8 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
-#include "webserv-lib.h"
+#include <time.h>
 #include "webserv-util.h"
-#include "webserv-vec.h"
-#include "webserv-contype.h"
 #include "webserv-dbg.h"
 
 /* strstrip()

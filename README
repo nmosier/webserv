@@ -1,3 +1,15 @@
+CS 315 Final Project: Web Server -- README
+Author: Nicholas Mosier
+Date: 12/17/2018
+
+OVERVIEW:
+There are multiple parts to the source code:
+      * libwebserv: a library for creating a web server. It provides functions for starting up the server,
+                    accepting connections, reading in requests, sending responses, etc. All sending and
+                    receiving is asynchronous. The source code for this library is contained in the folder
+                    "webserv-lib". It has its own Makefile, which builds the shared object library
+                    libwebserv.so. 
+
 
 QUESTIONS:
  * Would it make sense to dedicate a second thread in the "single-threaded" server to listen for new connections?
@@ -9,4 +21,5 @@ FUTURE WORK:
 RESOURCES:
  * https://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html
  * https://www.scottklement.com/rpg/socktut/nonblocking.html
- 
+ * https://stackoverflow.com/questions/24791625/how-to-handle-the-linux-socket-revents-pollerr-pollhup-and-pollnval
+ * https://stackoverflow.com/questions/7830954/gdb-is-there-a-command-that-allows-you-to-see-how-many-times-a-function-has-bee#7834479
