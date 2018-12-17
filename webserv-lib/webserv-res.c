@@ -16,11 +16,12 @@
 #include "webserv-util.h"
 #include "webserv-dbg.h"
 
-/*************** HTTP RESPONSE FUNCTIONS ***************/
+/* response_init(): initialize response. */
 void response_init(httpmsg_t *res) {
    message_init(res);
 }
 
+/* response_delete(): delete response. */
 void response_delete(httpmsg_t *res) {
    message_delete(res);
 
@@ -30,7 +31,50 @@ void response_delete(httpmsg_t *res) {
    }
 }
 
+/* response_send()
+ * DESC: send response (NONBLOCKING/ASYNCHRONOUS).
+ * ARGS:
+ *  - conn_fd: client socket to send response over.
+ *  - res: response to send.
+ * RETV: 0 if response finished sending; -1 if sending would block OR error occurred.
+ * NOTE:
+ *  - use message_error() to determine the cause of the error.
+ *  - to send a response, response_send() will likely need to be called multiple times
+ *    on the same response _res_.
+ */
+int response_send(int conn_fd, httpmsg_t *res) {
+   ssize_t bytes_sent, bytes_left;
 
+   /* format response if necessary */
+   if (res->hm_text == NULL) {
+      if (response_format(res) < 0) {
+         return -1;
+      }
+   }
+
+   /* send response (nonblocking) */
+   bytes_left = message_textfree(res);
+   while (bytes_left > 0) {
+      bytes_sent = send(conn_fd, res->hm_text_ptr, bytes_left, MSG_DONTWAIT);
+      if (bytes_sent < 0) {
+         return -1;
+      }
+      res->hm_text_ptr += bytes_sent;
+      bytes_left -= bytes_sent;
+   };
+                         
+   return 0;
+}
+
+
+/* response_find_status()
+ * DESC: convert status code to status phrase.
+ * ARGS:
+ *  - code: status code (see C_* #defines in webserv-lib.h)
+ * RETV: returns pointer to status phrase if found; if not found, returns NULL.
+ * ERRS:
+ *  - EINVAL: _code_ is not a valid status code.
+ */
 static httpres_stat_t hr_stats[] = {
    {C_OK, "OK"},
    {C_NOTFOUND, "Not found"},
@@ -44,10 +88,23 @@ httpres_stat_t *response_find_status(int code) {
     * (note: stat_it->phrase will be NULL at end of list)
     */
    for (stat_it = hr_stats; stat_it->phrase && stat_it->code != code; ++stat_it) {}
-   return stat_it->phrase ? stat_it : NULL;
+   if (stat_it->phrase == NULL) {
+      errno = EINVAL;
+      return NULL;
+   }
+   return stat_it;
 }
 
 
+/* response_insert_header()
+ * DESC: constructs header from key-value pair and inserts into response _res_.
+ * ARGS:
+ *  - key: header key (the part that precedes the colon).
+ *  - value: header value (the part that follows the colon, w/o leading space).
+ *  - res: response to which the header shall be added.
+ * RETV: returns 0 upon success, -1 upon error.
+ * NOTE: prints errors.
+ */
 int response_insert_header(const char *key, const char *val, httpmsg_t *res) {
    httpmsg_header_t *hdr;
    size_t new_nheaders;
@@ -78,8 +135,16 @@ int response_insert_header(const char *key, const char *val, httpmsg_t *res) {
 }
 
 
-// NOTE: body_rwp is set to BEGINNING; this is necessary for response_sned() to work
-int response_insert_body(const char *body, size_t bodylen, const char *type, httpmsg_t *res) {
+/* response_insert_body()
+ * DESC: copy _body_ into the body of the response _res_.
+ * ARGS:
+ *  - body: pointer to body to copy into _res_.
+ *  - bodylen: length of body to copy.
+ *  - type: body content type (as string).
+ *  - res: pointer to HTTP response
+ * RETV: 0 on success, -1 on error.
+ */
+int response_insert_body(const void *body, size_t bodylen, const char *type, httpmsg_t *res) {
    char *bodylen_str;
 
    /* resize response's text */
@@ -114,12 +179,19 @@ int response_insert_body(const char *body, size_t bodylen, const char *type, htt
 }
 
 
+/* response_insert_line()
+ * DESC: create and add HTTP response line into response _res_.
+ * ARGS:
+ *  - code: status code (C_* constant) of response line.
+ *  - version: version of web server.
+ *  - res: pointer to HTTP response.
+ * RETV: 0 on success, -1 on error.
+ */
 int response_insert_line(int code, const char *version, httpmsg_t *res) {
    httpres_stat_t *status;
    
    /* match code to response status */
    if ((status = response_find_status(code)) == NULL) {
-      errno = EINVAL; // invalid code
       return -1;
    }
    res->hm_line.resl.status = status;
@@ -132,7 +204,11 @@ int response_insert_line(int code, const char *version, httpmsg_t *res) {
    return 0;
 }
 
-// internal function -- it's ok that it return malloc'ed ptr
+/* response_format_headers()
+ * DESC: format HTTP response _res_'s headers as sendable string.
+ * RETV: pointer to malloc'ed string on success; NULL on error.
+ * NOTE: caller needs to free(3) returned non-NULL pointer after use.
+ */
 char *response_format_headers(httpmsg_t *res) {
    char *hdrs_str, *hdrs_str_it;
    size_t hdrs_str_len, hdrs_str_rem;
@@ -183,7 +259,11 @@ char *response_format_headers(httpmsg_t *res) {
    return hdrs_str;
 }
 
-// format response in hm_text member
+/* response_format()
+ * DESC: format response (formatted buffer is stored internally in response).
+ * RETV: 0 on success, -1 on error.
+ * NOTE: prints errors.
+ */
 int response_format(httpmsg_t *res) {
    const char *res_fmt;
    char *hdrs_str, *version;
@@ -245,33 +325,16 @@ int response_format(httpmsg_t *res) {
    return 0;
 }
 
-// upon first call, res->hm_body_rwp == res->hm_body_size;
-// allows for repeated sending
-int response_send(int conn_fd, httpmsg_t *res) {
-   ssize_t bytes_sent, bytes_left;
 
-   /* format response if necessary */
-   if (res->hm_text == NULL) {
-      if (response_format(res) < 0) {
-         return -1;
-      }
-   }
-
-   /* send response (nonblocking) */
-   bytes_left = message_textfree(res);
-   while (bytes_left > 0) {
-      bytes_sent = send(conn_fd, res->hm_text_ptr, bytes_left, MSG_DONTWAIT);
-      if (bytes_sent < 0) {
-         return -1;
-      }
-      res->hm_text_ptr += bytes_sent;
-      bytes_left -= bytes_sent;
-   };
-                         
-   return 0;
-}
-
-
+/* response_insert_file()
+ * DESC: add file at path _path_ to response _res_ (as the body).
+ * ARGS:
+ *  - path: path of file to add.
+ *  - res: response to add the file to.
+ *  - ftypes: content type table pointer.
+ * RETV: returns 0 upon success, returns -1 upon error.
+ * NOTE: this is a higher-level function than response_insert_body().
+ */
 int response_insert_file(const char *path, httpmsg_t *res, const filetype_table_t *ftypes) {
    int fd;
    struct stat fd_info;
@@ -339,6 +402,10 @@ int response_insert_file(const char *path, httpmsg_t *res, const filetype_table_
 }
 
 
+/* response_insert_genhdrs()
+ * DESC: insert general headers into response.
+ * RETV: 0 on success, -1 on error.
+ */
 int response_insert_genhdrs(httpmsg_t *res) {
    time_t curtime;
    char *date;
@@ -359,7 +426,10 @@ int response_insert_genhdrs(httpmsg_t *res) {
    return 0;
 }
 
-
+/* response_insert_servhdrs()
+ * DESC: insert server-specific headers into response (HM_HDR_SERVER, HM_HDR_CONNECTION).
+ * RETV: 0 on success, -1 on error.
+ */
 int response_insert_servhdrs(const char *servname, httpmsg_t *res) {
    struct utsname sysinfo;
    char *serv;
