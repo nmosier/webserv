@@ -16,12 +16,31 @@
 #include "webserv-util.h"
 #include "webserv-dbg.h"
 
-/*************** HTTP MESSAGE FUNCTIONS ***************/
+/* message_textfree() 
+ * DESC: returns number of unused bytes in the text buffer of _msg_.
+ */
 size_t message_textfree(const httpmsg_t *msg) {
    return msg->hm_text_size - (msg->hm_text_ptr - msg->hm_text);
 }
 
 
+
+/* message_init()
+ * DESC: initialize HTTP message.
+ * NOTE: you should probably be calling request_init() or response_init().
+ */
+void message_init(httpmsg_t *msg) {
+   /* initialize struct fields */
+   memset(msg, 0, sizeof(httpmsg_t));
+}
+
+
+/* message_delete()
+ * DESC: deletes _msg_'s members shared by both requests and responses.
+ * NOTE: calls to message_init() and ONLY calls to message_init() should
+ *       be matched with a call to message_delete(). Otherwise, use 
+ *       request_delete() or response_init().
+ */
 void message_delete(httpmsg_t *msg) {
    if (msg) {
       /* free header members */
@@ -45,12 +64,14 @@ void message_delete(httpmsg_t *msg) {
 }
 
 
-void message_init(httpmsg_t *msg) {
-   /* initialize struct fields */
-   memset(msg, 0, sizeof(httpmsg_t));
-}
-
-
+/* message_resize_headers()
+ * DESC: resizes the number of headers in HTTP message _msg_'s header array,
+ *       truncating off exisiting elements if necessary.
+ * ARGS:
+ *  - new_nheaders: new length of header array.
+ *  - msg: pointer to HTTP message (request or response).
+ * RETV: returns 0 on success, -1 on error.
+ */
 int message_resize_headers(size_t new_nheaders, httpmsg_t *msg) {
    httpmsg_header_t *newheaders;
    size_t endp_index;
@@ -79,6 +100,13 @@ int message_resize_headers(size_t new_nheaders, httpmsg_t *msg) {
    return 0;
 }
 
+/* message_resize_body()
+ * DESC: resize the body of _msg_.
+ * ARGS:
+ *  - newsize: new size of body.
+ *  - msg: HTTP message (req. or res.) whose body should be resized.
+ * RETV: 0 on success, -1 on error.
+ */
 int message_resize_body(size_t newsize, httpmsg_t *msg) {
    char *newbody;
 
@@ -94,7 +122,7 @@ int message_resize_body(size_t newsize, httpmsg_t *msg) {
    return 0;
 }
 
-
+/* see message_resize_body()'s documentation, sed 's/body/text/g' */
 int message_resize_text(size_t newsize, httpmsg_t *msg) {
    char *newtext;
 
