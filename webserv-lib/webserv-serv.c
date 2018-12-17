@@ -16,8 +16,10 @@
 #include "webserv-util.h"
 #include "webserv-dbg.h"
 
-/*************** SERVER FUNCTIONS ***************/
-
+/* server_start()
+ * DESC: start the web server on port _port_ with backlog _backlog_.
+ * RETV: the server socket on success, -1 on error.
+ */
 int server_start(const char *port, int backlog) {
    int servsock_fd;
    struct addrinfo *res;
@@ -78,6 +80,13 @@ int server_start(const char *port, int backlog) {
 }
 
 
+/* server_accept
+ * DESC: accept client connection.
+ * ARGS:
+ *  - servfd: server socket listening for connections.
+ * RETV: see accept(2).
+ * NOTE: blocks.
+ */
 int server_accept(int servfd) {
    socklen_t addrlen;
    struct sockaddr_in client_sa;
@@ -91,7 +100,19 @@ int server_accept(int servfd) {
 }
 
 
-// returns response
+/* server_handle_req()
+ * DESC: given HTTP request that has been fully read & parsed, create HTTP response.
+ * ARGS:
+ *  - conn_fd: client socket to send response to.
+ *  - docroot: the root directory to prepend resource requests to.
+ *  - servname: name of server version.
+ *  - req: pointer to request.
+ *  - res: pointer to response to be created.
+ * RETV: 0 on success, -1 on error.
+ * ERRS:
+ *  - EBADRQC: bad HTTP method in request.
+ *  - see server_handle_get()
+ */
 int server_handle_req(int conn_fd, const char *docroot, const char *servname,
                       httpmsg_t *req, httpmsg_t *res, const filetype_table_t *ftypes) {
    switch (req->hm_line.reql.method) {
@@ -106,6 +127,12 @@ int server_handle_req(int conn_fd, const char *docroot, const char *servname,
 
 // handle GET request
 // TODO: make case statement table-driven, not switch case
+/* server_handle_get()
+ * DESC: given HTTP request with method "GET", create HTTP response.
+ * ARGS: (see server_handle_req())
+ * RETV: 0 on success, -1 on error.
+ * ERRS: (see server_handle_req())
+ */
 int server_handle_get(int conn_fd, const char *docroot, const char *servname, httpmsg_t *req,
                       httpmsg_t *res, const filetype_table_t *ftypes) {
    char *path;
