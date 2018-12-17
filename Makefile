@@ -43,5 +43,5 @@ kill:
 
 .PHONY: clean
 clean:
-	rm -f $(OBJS_SINGLE) $(OBJS_MULTI) $(BINS) libwebserv.so
+	rm -f $(OBJS_SINGLE) $(OBJS_MULTI) $(BINS) libwebserv.so mime_sorted.types
 	cd $(LIBDIR) && make clean
