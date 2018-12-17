@@ -9,10 +9,21 @@
 #include "webserv-fds.h"
 #include "webserv-dbg.h"
 
+/* httpfds_init()
+ * DESC: initializes a list of HTTP file descriptors ("hfds").
+ */
 void httpfds_init(httpfds_t *hfds) {
    memset(hfds, 0, sizeof(httpfds_t));
 }
 
+/* httpfds_resize()
+ * DESC: resizes all 3 arrays (fds, reqs, resps) to length _newlen_. If the number
+ *       of elements before resizing is less than _newlen_, these elements are lost.
+ * ARGS:
+ *  - newlen: new length of the 3 arrays.
+ *  - hfds: pointer to the HTTP fds record.
+ * RETV: returns 0 upon success, -1 upon error.
+ */
 int httpfds_resize(size_t newlen, httpfds_t *hfds) {
    struct pollfd *fds_tmp;
    httpmsg_t *reqs_tmp, *resps_tmp;
@@ -38,6 +49,15 @@ int httpfds_resize(size_t newlen, httpfds_t *hfds) {
 }
 
 
+/* httpfds_insert()
+ * DESC: add new entry for file descriptor _fd_ with events mask _events_ into 
+ *       HTTP file descriptor array _hfds_.
+ * ARGS:
+ *  - fd: file descriptor to insert.
+ *  - events: events mask for file descriptor (see poll(2)).
+ *  - hfds: list of HTTP file descriptors to inserts entry into.
+ * RETV: 0 on success, -1 on error.
+ */
 int httpfds_insert(int fd, int events, httpfds_t *hfds) {
    struct pollfd *fdentry;
    httpmsg_t *reqentry, *respentry;
@@ -70,7 +90,16 @@ int httpfds_insert(int fd, int events, httpfds_t *hfds) {
    return 0;
 }
 
-/* doesn't change ordering of entries */
+/* httpfds_remove() 
+ * DESC: mark entry at index _index_ from HTTP file descriptor array as removed
+ *       (without changing the indices of other entries in the array).
+ * ARGS:
+ *  - index: index of entry to remove.
+ *  - hfds: pointer to HTTP file descriptor array.
+ * RETV: 0 on success, -1 on error.
+ * NOTE: does not change the indices of other entries in the array. Use httpfds_pack()
+ *       to compact the array after removing elements.
+ */
 int httpfds_remove(size_t index, httpfds_t *hfds) {
    int *fdp;
    httpmsg_t *reqp, *resp;
@@ -97,7 +126,12 @@ int httpfds_remove(size_t index, httpfds_t *hfds) {
    return retv;
 }
 
-// removes fds < 0
+/* httpfds_pack()
+ * DESC: compact the HTTP file descriptor array _hfds_ by overwriting removed entries.
+ * ARGS:
+ *  - hfds: HTTP file descriptor array to pack.
+ * RETV: the number of elements in the packed array.
+ */
 size_t httpfds_pack(httpfds_t *hfds) {
    ssize_t front, back;
    size_t newcount;
@@ -119,9 +153,6 @@ size_t httpfds_pack(httpfds_t *hfds) {
             --back;
             --newcount;
          } while (front < back && hfds->fds[back].fd < 0);
-         //--back;
-         //--newcount;
-         //}
       }
       
       ++front;
@@ -132,13 +163,19 @@ size_t httpfds_pack(httpfds_t *hfds) {
    return newcount;
 }
 
-/* cleanup & delete */
+/* httpfds_delete()
+ * DESC: removes all elements in _hfds_ and frees all members of _hfds_.
+ * RETV: returns 0 on success, -1 on error.
+ */
 int httpfds_delete(httpfds_t *hfds) {
-   int retv;
+   int retv, errsav;
 
    retv = 0;
    for (size_t i = 0; i < hfds->count; ++i) {
-      httpfds_remove(i, hfds);
+      if (httpfds_remove(i, hfds) < 0) {
+         retv = -1;
+         errsav = errno;
+      }
    }
    
    free(hfds->fds);
@@ -146,5 +183,6 @@ int httpfds_delete(httpfds_t *hfds) {
    free(hfds->resps);
    memset(hfds, 0, sizeof(httpfds_t));
 
+   errno = errsav;
    return retv;
 }
