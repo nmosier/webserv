@@ -106,7 +106,7 @@ int main(int argc, char *argv[]) {
  */
 void handler_sigint(int signum) {
    /* stop accepting new connections */
-   printf("webserv-single: closing server to new connections...\n");
+   printf("webserv-main: closing server to new connections...\n");
    server_accepting = 0;
 }
 
@@ -121,6 +121,6 @@ void handler_sigpipe(int signum) {
    /* catch SIGPIPE & do nothing so that send(2) will fail with
     * EPIPE in the corresponding thread */
    if (DEBUG) {
-      printf("webserv-multi: caught signal SIGPIPE\n");
+      printf("webserv-main: caught signal SIGPIPE\n");
    }
 }
