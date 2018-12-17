@@ -13,6 +13,13 @@
 #include "webserv-dbg.h"
 #include "webserv-contype.h"
 
+/* content_types_load()
+ * DESC: load content types table from file.
+ * ARGS:
+ *  - tabpath: path to table file (e.g. "/etc/mime.types").
+ *  - ftypes: pointer to content type table. 
+ * RETV: 0 on success, -1 on error.
+ */
 int content_types_load(const char *tabpath, filetype_table_t *ftypes) {
    int tabfd;
    off_t tablen;
@@ -127,21 +134,27 @@ int content_types_load(const char *tabpath, filetype_table_t *ftypes) {
    return retv;
 }
 
-   void content_type_init(filetype_t *ftype) {
-      memset(ftype, 0, sizeof(*ftype));
-   }
-   
+/* content_type_init(): initialize content type struct. */
+void content_type_init(filetype_t *ftype) {
+   memset(ftype, 0, sizeof(*ftype));
+}
+
+/* content_types_cmp(): compare two content types. */
 int content_types_cmp(const filetype_t *ft1, const filetype_t *ft2) {
    return strcmp(ft1->ext, ft2->ext);
 }
 
+/* content_type_del(): delete a content type struct. */
 int content_type_del(filetype_t *ft) {
    free(ft->name);
    free(ft->ext);
    return 0; // always succeeds
 }
 
-
+/* content_type_get()
+ * DESC: find content type of file at path _path_ by looking in table _ftypes_.
+ * RETV: returns pointer to content type as string.
+ */
 const char *content_type_get(const char *path, const filetype_table_t *ftypes) {
    char *name, *ext;
    filetype_t key, *match;
@@ -165,6 +178,13 @@ const char *content_type_get(const char *path, const filetype_table_t *ftypes) {
    return name;
 }
 
+/* content_types_save()
+ * DESC: save content type table to file.
+ * ARGS:
+ *  - path: path at which to save table.
+ *  - ftypes: pointer to table to save.
+ * RETV: 0 on success, -1 on error.
+ */
 int content_types_save(const char *path, const filetype_table_t *ftypes) {
    FILE *file;
    size_t i;
@@ -197,6 +217,9 @@ int content_types_save(const char *path, const filetype_table_t *ftypes) {
    return retv;
 }
 
+/* content_types_delete()
+ * DESC: delete content type table.
+ */
 void content_types_delete(filetype_table_t *ftypes) {
    VECTOR_DELETE(ftypes, content_type_del);
 }
