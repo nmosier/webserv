@@ -84,7 +84,7 @@ void response_init(httpmsg_t *res);
 void response_delete(httpmsg_t *res);
 int response_insert_line(int code, const char *version, httpmsg_t *res);
 int response_insert_header(const char *key, const char *val, httpmsg_t *res);
-int response_insert_body(const char *body, size_t bodylen, const char *type, httpmsg_t *res);
+int response_insert_body(const void *body, size_t bodylen, const char *type, httpmsg_t *res);
 int response_insert_file(const char *path, httpmsg_t *res, const filetype_table_t *ftypes);
 int response_insert_genhdrs(httpmsg_t *res);
 int response_insert_servhdrs(const char *servname, httpmsg_t *res);

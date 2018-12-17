@@ -42,6 +42,8 @@ void response_delete(httpmsg_t *res) {
  *  - to send a response, response_send() will likely need to be called multiple times
  *    on the same response _res_.
  */
+char *response_format_headers(httpmsg_t *res);
+int response_format(httpmsg_t *res);
 int response_send(int conn_fd, httpmsg_t *res) {
    ssize_t bytes_sent, bytes_left;
 
