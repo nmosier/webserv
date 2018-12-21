@@ -1,6 +1,7 @@
 #include <stdlib.h>
-#include <string.h>
 #include <stdio.h>
+#include <stdarg.h>
+#include <string.h>
 #include <errno.h>
 #include <unistd.h>
 #include <ctype.h>
@@ -11,6 +12,46 @@
 #include <time.h>
 #include "webserv-util.h"
 #include "webserv-dbg.h"
+
+/* smprintf()
+ * DESC: format string into dynamically allocated string -- s(tring)m(alloc)printf(ormatted)
+ * ARGS:
+ *  - sptr: pointer to location at which to store allocated string.
+ *  - fmt: format string (see sprintf(3))
+ *  - ...: format arguments (see sprintf(3))
+ * RETV: see sprintf(3)
+ * ERRS: see sprintf(3)
+ * NOTE: _*sptr_ is only modified and string is only allocated (and thus needs to bee free(3)ed
+ *       if smprintf() is successful.
+ */
+int smprintf(char **sptr, const char *fmt, ...) {
+   va_list args;
+   int strlen;
+   char *str;
+
+   /* get formatted string length */
+   va_start(args, fmt);
+   if ((strlen = vsnprintf(NULL, 0, fmt, args)) < 0) {
+      return -1;
+   }
+   va_end(args);
+
+   /* allocate buffer for formatted string */
+   if ((str = malloc(strlen + 1)) == NULL) { // note: count + 1 > 0
+      return -1;
+   }
+
+   /* format string */
+   va_start(args, fmt);
+   if ((vsnprintf(str, strlen + 1, fmt, args)) > strlen) {
+      free(str);
+      return -1;
+   }
+   va_end(args);
+
+   *sptr = str;
+   return strlen;
+}
 
 /* strstrip()
  * DESC: strip any leading characters of _str_ that occur in _strip_

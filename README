@@ -29,11 +29,12 @@ The command line options are:
 QUESTIONS:
  * I'm not sure whether I like or dislike the VECTOR_* API in webserv-lib/webserv-vec.[ch]. Macros
    seemed necessary for usage of the vector_* family of functions not to be grotesquely verbose.
- * smprintf(), macro defined in webserv-lib/webserv-util.h -- first of all, it seemed impossible
-   to write this as a proper function (without re-implementing printf() to count the number of
-   arguments to expect). Secondly, is using a function like this bad practice? It is far more
-   convenient than guessing or calculating how long a formatted string ought to be, but I find it
-   pecuiliar that there is no equivalent to smprintf() in glibc (the closest is snprintf(3)).
+ * [ smprintf(), macro defined in webserv-lib/webserv-util.h -- first of all, it seemed impossible
+     to write this as a proper function (without re-implementing printf() to count the number of
+     arguments to expect). Secondly, is using a function like this bad practice? It is far more
+     convenient than guessing or calculating how long a formatted string ought to be, but I find it
+     pecuiliar that there is no equivalent to smprintf() in glibc (the closest is snprintf(3)). ]
+   UPDATE 12/21/18: I figured out how to implement it using the <stdarg.h> va_* macros.
 
 KNOWN BUGS: none, but this hasn't been extensively tested.
 
