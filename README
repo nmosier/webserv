@@ -18,6 +18,12 @@ There are multiple parts to the source code:
 Both webservers provide the required basic features and the following additional features:
  - MIME type.
  - Graceful shutdown.
+ 
+SYSTEM REQUIREMENTS:
+ * Compatible with UNIX-based systems
+ * Requires /etc/mime.types file 
+     (download from http://svn.apache.org/viewvc/httpd/httpd/branches/2.2.x/docs/conf/mime.types?view=markup)
+ * Tested on Linux (Fedora 27) only
 
 USAGE:
 Both webservers have the same command-line invocation (since they share the same main() function).
