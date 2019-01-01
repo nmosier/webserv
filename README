@@ -42,9 +42,3 @@ FUTURE WORK:
  * (multithreaded version) Have client-serving threads remove themselves from
     the pthread list after exiting (would need to use a mutex to lock the pthread list).
  * Implement the remaining "Hard Mode" features.
-
-RESOURCES:
- * https://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html
- * https://www.scottklement.com/rpg/socktut/nonblocking.html
- * https://stackoverflow.com/questions/24791625/how-to-handle-the-linux-socket-revents-pollerr-pollhup-and-pollnval
- * https://stackoverflow.com/questions/7830954/gdb-is-there-a-command-that-allows-you-to-see-how-many-times-a-function-has-bee#7834479
