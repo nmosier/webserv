@@ -2,6 +2,7 @@
 #define __WEBSERV_UTIL_H
 
 #include <stdio.h>
+#include <time.h>
 #include "webserv-msg.h"
 
 int smprintf(char **sptr, const char *fmt, ...);

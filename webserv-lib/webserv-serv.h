@@ -1,7 +1,13 @@
 #ifndef __WEBSERV_SERV_H
 #define __WEBSERV_SERV_H
 
+#include <errno.h>
+
 #include "webserv-contype.h"
+
+#ifndef EBADRQC
+#define EBADRQC EINVAL
+#endif
 
 int server_start(const char *port, int backlog);
 int server_accept(int servfd);

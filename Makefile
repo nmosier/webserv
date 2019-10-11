@@ -19,7 +19,7 @@ st-httpd: webserv-single
 	ln -f $^ $@
 
 libwebserv.so: $(LIBDIR)/$@
-	cd $(LIBDIR) && make $@ && ln -f $@ ..
+	cd $(LIBDIR) && $(MAKE) $@ && ln -f $@ ..
 
 webserv-multi: $(OBJS_MULTI) libwebserv.so
 	gcc -o $@ $(OBJS_MULTI) -pthread $(LIBFLAGS)
@@ -44,4 +44,4 @@ kill:
 .PHONY: clean
 clean:
 	rm -f $(OBJS_SINGLE) $(OBJS_MULTI) $(BINS) libwebserv.so mime_sorted.types
-	cd $(LIBDIR) && make clean
+	cd $(LIBDIR) && $(MAKE) clean

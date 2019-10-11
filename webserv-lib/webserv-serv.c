@@ -12,6 +12,7 @@
 #include <time.h>
 #include <fcntl.h>
 #include <sys/utsname.h>
+#include <netinet/in.h>
 //#include "webserv-lib.h"
 #include "webserv-util.h"
 #include "webserv-dbg.h"
